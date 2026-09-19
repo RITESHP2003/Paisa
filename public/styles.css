@@ -1,0 +1,301 @@
+/* ── Reset & Theme ── */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+.hidden{display:none!important}
+html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
+
+body{
+  --bg:#0a0a14;--surface:rgba(22,22,42,0.7);--surface-solid:#16162a;
+  --surface2:rgba(34,34,64,0.6);--glass:rgba(255,255,255,0.04);
+  --glass-border:rgba(255,255,255,0.08);--text:#eef0ff;--text-muted:#7b7bab;
+  --text-dim:#4a4a6a;--accent:#7c6cf0;--accent2:#a78bfa;
+  --accent-glow:rgba(124,108,240,0.25);--green:#34d399;--green-dim:rgba(52,211,153,0.15);
+  --yellow:#fbbf24;--yellow-dim:rgba(251,191,36,0.15);
+  --orange:#fb923c;--orange-dim:rgba(251,146,60,0.15);
+  --red:#f87171;--red-dim:rgba(248,113,113,0.15);
+  --bar-bg:rgba(10,10,20,0.85);
+  background:linear-gradient(160deg,#0a0a14 0%,#0d0d1f 40%,#121228 100%);
+  color:var(--text)
+}
+
+/* ── Bottom Nav ── */
+.bottom-nav{
+  position:fixed;bottom:0;left:0;right:0;z-index:30;height:64px;
+  background:var(--bar-bg);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border-top:1px solid var(--glass-border);
+  display:flex;align-items:center;justify-content:space-around;
+  padding-bottom:env(safe-area-inset-bottom,0)
+}
+.nav-item{
+  display:flex;flex-direction:column;align-items:center;gap:2px;
+  background:none;border:none;color:var(--text-dim);font-size:.62rem;
+  cursor:pointer;touch-action:manipulation;padding:8px 16px;
+  transition:color .2s;min-width:56px
+}
+.nav-item .nav-icon{font-size:1.3rem;line-height:1}
+.nav-item.active{color:var(--accent2)}
+.nav-item.active .nav-icon{filter:drop-shadow(0 0 6px var(--accent-glow))}
+
+/* ── Screens ── */
+.screen{
+  position:fixed;top:0;left:0;right:0;bottom:64px;
+  overflow-y:auto;-webkit-overflow-scrolling:touch;
+  padding:0 16px 24px;
+  animation:fadeIn .25s ease
+}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* ── Glass Cards ── */
+.glass-card{
+  background:var(--surface);border:1px solid var(--glass-border);
+  border-radius:16px;padding:16px;
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)
+}
+.glass-card+.glass-card{margin-top:12px}
+
+/* ── Page Header ── */
+.page-header{
+  padding:16px 0 12px;display:flex;align-items:center;justify-content:space-between
+}
+.page-title{font-size:1.4rem;font-weight:700}
+.page-subtitle{font-size:.8rem;color:var(--text-muted);margin-top:2px}
+
+/* ── Hero Number (Safe to Spend) ── */
+.hero-amount{
+  font-size:2.8rem;font-weight:800;
+  background:linear-gradient(135deg,var(--green),#6ee7b7);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;line-height:1.1
+}
+.hero-amount.warning{
+  background:linear-gradient(135deg,var(--orange),var(--yellow));
+  -webkit-background-clip:text;background-clip:text
+}
+.hero-amount.danger{
+  background:linear-gradient(135deg,var(--red),var(--orange));
+  -webkit-background-clip:text;background-clip:text
+}
+.hero-label{font-size:.75rem;color:var(--text-muted);margin-top:4px}
+.hero-daily{font-size:1rem;color:var(--text-muted);margin-top:8px}
+.hero-daily strong{color:var(--text);font-weight:700}
+
+/* ── Progress Bar ── */
+.progress-bar{height:8px;background:var(--surface2);border-radius:4px;overflow:hidden;margin:8px 0}
+.progress-fill{height:100%;border-radius:4px;transition:width .5s ease}
+.progress-fill.green{background:linear-gradient(90deg,var(--green),#6ee7b7)}
+.progress-fill.accent{background:linear-gradient(90deg,var(--accent),var(--accent2))}
+.progress-fill.yellow{background:linear-gradient(90deg,var(--yellow),var(--orange))}
+.progress-fill.red{background:linear-gradient(90deg,var(--red),#fca5a5)}
+.progress-label{display:flex;justify-content:space-between;font-size:.72rem;color:var(--text-muted)}
+
+/* ── Snapshot Inputs ── */
+.snapshot-row{display:flex;gap:10px;margin-top:12px}
+.snapshot-field{flex:1;display:flex;flex-direction:column;gap:4px}
+.snapshot-field label{font-size:.7rem;color:var(--text-muted)}
+.snapshot-field input{
+  background:var(--surface2);border:1px solid var(--glass-border);
+  border-radius:10px;padding:10px 12px;color:var(--text);font-size:1rem;
+  width:100%;outline:none;transition:border-color .2s
+}
+.snapshot-field input:focus{border-color:var(--accent)}
+.snapshot-field input::placeholder{color:var(--text-dim)}
+
+/* ── Buttons ── */
+.btn-primary{
+  padding:12px 24px;border:none;border-radius:12px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:#fff;font-size:.9rem;font-weight:600;cursor:pointer;
+  width:100%;touch-action:manipulation;min-height:46px;
+  transition:transform .1s,box-shadow .2s;
+  box-shadow:0 4px 20px var(--accent-glow)
+}
+.btn-primary:active{transform:scale(.97)}
+.btn-secondary{
+  padding:10px 20px;border:1px solid var(--glass-border);border-radius:12px;
+  background:var(--glass);color:var(--text);font-size:.85rem;cursor:pointer;
+  width:100%;backdrop-filter:blur(8px);touch-action:manipulation
+}
+.btn-sm{padding:8px 16px;font-size:.78rem;min-height:36px;width:auto;border-radius:10px}
+.btn-danger{
+  padding:10px 20px;border:1px solid var(--red);border-radius:10px;
+  background:none;color:var(--red);font-size:.82rem;cursor:pointer
+}
+.btn-row{display:flex;gap:8px;margin-top:12px}
+
+/* ── Pot Cards (Home) ── */
+.pot-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.pot-card{
+  background:var(--surface);border:1px solid var(--glass-border);
+  border-radius:14px;padding:14px;cursor:pointer;
+  touch-action:manipulation;transition:transform .15s,box-shadow .2s
+}
+.pot-card:active{transform:scale(.97);box-shadow:0 0 16px var(--accent-glow)}
+.pot-name{font-size:.75rem;color:var(--text-muted);margin-bottom:4px}
+.pot-balance{font-size:1.15rem;font-weight:700}
+.pot-target{font-size:.65rem;color:var(--text-dim);margin-top:6px}
+.pot-mini-bar{height:4px;background:var(--surface2);border-radius:2px;overflow:hidden;margin-top:6px}
+.pot-mini-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .5s}
+
+/* ── Net Worth ── */
+.networth-card{
+  background:linear-gradient(135deg,rgba(124,108,240,0.12),rgba(167,139,250,0.08));
+  border:1px solid rgba(124,108,240,0.2);border-radius:16px;padding:16px;margin-top:12px
+}
+.networth-label{font-size:.75rem;color:var(--accent2);font-weight:600}
+.networth-amount{font-size:1.8rem;font-weight:800;margin-top:4px}
+.networth-breakdown{display:flex;gap:16px;margin-top:8px}
+.networth-item{font-size:.7rem;color:var(--text-muted)}
+.networth-item strong{color:var(--text);font-weight:600;display:block}
+
+/* ── Pot Detail Screen ── */
+.pot-detail-header{padding:20px 0 12px}
+.pot-detail-balance{font-size:2.2rem;font-weight:800}
+.pot-detail-target{font-size:.85rem;color:var(--text-muted);margin-top:4px}
+.pot-eta{font-size:.75rem;color:var(--accent2);margin-top:6px;font-weight:600}
+
+.tx-list{margin-top:12px}
+.tx-item{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 0;border-bottom:1px solid var(--glass-border)
+}
+.tx-item:last-child{border-bottom:none}
+.tx-left{display:flex;flex-direction:column;gap:2px}
+.tx-note{font-size:.85rem;color:var(--text)}
+.tx-date{font-size:.68rem;color:var(--text-dim)}
+.tx-amount{font-size:.95rem;font-weight:700}
+.tx-amount.credit{color:var(--green)}
+.tx-amount.debit{color:var(--red)}
+
+/* ── Month Cards ── */
+.month-card{
+  background:var(--surface);border:1px solid var(--glass-border);
+  border-radius:16px;overflow:hidden;margin-top:10px
+}
+.month-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 16px;cursor:pointer;touch-action:manipulation
+}
+.month-header:active{background:var(--glass)}
+.month-name{font-size:.95rem;font-weight:700}
+.month-salary{font-size:.8rem;color:var(--green)}
+.month-chevron{color:var(--text-dim);transition:transform .2s}
+.month-card.expanded .month-chevron{transform:rotate(180deg)}
+.month-body{padding:0 16px 14px;display:none}
+.month-card.expanded .month-body{display:block}
+.month-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:8px 0;font-size:.82rem;border-bottom:1px solid var(--glass-border)
+}
+.month-row:last-child{border-bottom:none}
+.month-row-label{color:var(--text-muted)}
+.month-row-value{font-weight:600}
+
+/* ── Trend Charts ── */
+.chart-container{
+  position:relative;width:100%;height:200px;margin:12px 0
+}
+.chart-canvas{width:100%;height:100%}
+.chart-legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:.72rem;color:var(--text-muted)}
+.legend-dot{width:8px;height:8px;border-radius:50%}
+
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.stat-card{
+  background:var(--surface);border:1px solid var(--glass-border);
+  border-radius:14px;padding:14px;text-align:center
+}
+.stat-value{font-size:1.4rem;font-weight:800}
+.stat-label{font-size:.68rem;color:var(--text-muted);margin-top:4px}
+
+/* ── More Screen ── */
+.more-item{
+  display:flex;align-items:center;gap:12px;padding:14px;
+  border-bottom:1px solid var(--glass-border);
+  cursor:pointer;touch-action:manipulation;transition:background .15s
+}
+.more-item:active{background:var(--glass)}
+.more-icon{font-size:1.3rem;width:36px;height:36px;border-radius:10px;
+  background:var(--surface2);display:flex;align-items:center;justify-content:center}
+.more-label{flex:1;font-size:.9rem}
+.more-chevron{color:var(--text-dim)}
+
+/* ── Modal / Sheet ── */
+.modal-overlay{
+  position:fixed;inset:0;z-index:50;background:rgba(0,0,0,0.6);
+  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+  display:flex;align-items:flex-end;justify-content:center;
+  animation:fadeOverlay .2s ease
+}
+@keyframes fadeOverlay{from{opacity:0}to{opacity:1}}
+.modal-sheet{
+  background:var(--surface-solid);border-radius:20px 20px 0 0;
+  padding:20px 16px calc(20px + env(safe-area-inset-bottom,0));
+  width:100%;max-width:480px;max-height:85vh;overflow-y:auto;
+  animation:slideUp .3s cubic-bezier(.4,.2,.2,1)
+}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:none}}
+.modal-handle{width:36px;height:4px;background:var(--surface2);border-radius:2px;margin:0 auto 16px}
+.modal-title{font-size:1.1rem;font-weight:700;margin-bottom:16px}
+
+/* ── Form Elements ── */
+.form-group{margin-bottom:14px}
+.form-label{display:block;font-size:.75rem;color:var(--text-muted);margin-bottom:6px}
+.form-input{
+  width:100%;background:var(--surface2);border:1px solid var(--glass-border);
+  border-radius:10px;padding:10px 12px;color:var(--text);font-size:.95rem;outline:none
+}
+.form-input:focus{border-color:var(--accent)}
+.form-input::placeholder{color:var(--text-dim)}
+select.form-input{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237b7bab' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+
+/* ── Celebration ── */
+.celebration{
+  position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;background:rgba(0,0,0,0.85);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  animation:fadeIn .3s ease;gap:16px;padding:32px
+}
+.celebration-emoji{font-size:4rem;animation:bounce 1s ease infinite}
+@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+.celebration-text{font-size:1.3rem;font-weight:700;text-align:center}
+.celebration-sub{font-size:.85rem;color:var(--text-muted);text-align:center}
+
+/* ── Afford Calculator ── */
+.afford-input{
+  font-size:2rem;font-weight:700;text-align:center;width:100%;
+  background:none;border:none;border-bottom:2px solid var(--glass-border);
+  color:var(--text);padding:12px;outline:none
+}
+.afford-input:focus{border-color:var(--accent)}
+.afford-result{margin-top:16px;text-align:center}
+.afford-verdict{font-size:1.1rem;font-weight:700;margin-bottom:8px}
+.afford-detail{font-size:.82rem;color:var(--text-muted);line-height:1.6}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--surface2);border-radius:2px}
+
+/* ── Toast ── */
+.toast{
+  position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:60;
+  background:var(--surface-solid);border:1px solid var(--glass-border);
+  border-radius:12px;padding:10px 20px;font-size:.82rem;
+  box-shadow:0 4px 24px rgba(0,0,0,0.4);
+  animation:toastIn .3s ease;pointer-events:none
+}
+@keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+
+/* ── Back Button ── */
+.back-btn{
+  background:none;border:none;color:var(--text);font-size:1.3rem;
+  padding:8px;cursor:pointer;touch-action:manipulation;
+  display:flex;align-items:center;gap:6px
+}
+.back-btn span{font-size:.9rem;font-weight:600}
+
+/* ── Section Headers ── */
+.section-label{font-size:.72rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin:16px 0 8px}
+
+/* ── Edit Inline ── */
+.editable{cursor:pointer;border-bottom:1px dashed var(--text-dim);transition:border-color .2s}
+.editable:hover{border-color:var(--accent)}
