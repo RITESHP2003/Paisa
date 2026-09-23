@@ -1671,36 +1671,9 @@ async function init() {
   renderHome();
 }
 
-// Register service worker with self-healing update
-const APP_CACHE_VERSION = "paisa-v3";
-
+// Simple service worker registration — no reload loops
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js").then(reg => {
-    // Check for updates every 5 min (not 60s — avoids churn)
-    setInterval(() => reg.update(), 300000);
-
-    // When a new SW is found waiting, force it to activate
-    reg.addEventListener("updatefound", () => {
-      const newWorker = reg.installing;
-      if (!newWorker) return;
-      newWorker.addEventListener("statechange", () => {
-        if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-          newWorker.postMessage("SKIP_WAITING");
-        }
-      });
-    });
-  });
-
-  // When the new SW takes control, reload ONCE to get fresh assets
-  let refreshing = false;
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (refreshing) return;
-    // Only reload if we aren't already on the right version
-    if (sessionStorage.getItem("paisa-sw-refreshed") === APP_CACHE_VERSION) return;
-    refreshing = true;
-    sessionStorage.setItem("paisa-sw-refreshed", APP_CACHE_VERSION);
-    window.location.reload();
-  });
+  navigator.serviceWorker.register("sw.js");
 }
 
 init();

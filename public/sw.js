@@ -1,9 +1,9 @@
-const CACHE_NAME = "paisa-v3";
+const CACHE_NAME = "paisa-v4";
 const SHELL = [
   "./",
   "index.html",
-  "styles.css?v=3",
-  "app.js?v=3",
+  "styles.css?v=4",
+  "app.js?v=4",
   "manifest.json"
 ];
 
@@ -20,6 +20,7 @@ self.addEventListener("activate", (e) => {
   );
 });
 
+// Network-first: try server, fall back to cache for offline
 self.addEventListener("fetch", (e) => {
   e.respondWith(
     fetch(e.request)
@@ -30,14 +31,4 @@ self.addEventListener("fetch", (e) => {
       })
       .catch(() => caches.match(e.request))
   );
-});
-
-// Force update message from app.js
-self.addEventListener("message", (e) => {
-  if (e.data === "SKIP_WAITING") {
-    self.skipWaiting();
-  }
-  if (e.data === "GET_VERSION") {
-    e.source.postMessage({ type: "VERSION", version: CACHE_NAME });
-  }
 });

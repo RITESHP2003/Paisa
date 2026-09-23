@@ -8,45 +8,36 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Paisa</title>
   <script>
-  // Self-healing: nuke stale service workers — runs once per version bump
+  // Escape hatch: visit ?reset to nuke everything and start fresh
+  // Also auto-clears stale SW caches on version mismatch (no reload loop)
   (function(){
-    var REQUIRED = "paisa-v3";
-    var NUKE_KEY = "paisa-nuke-" + REQUIRED;
-    if (!navigator.serviceWorker) return;
-    // Only run the nuke once per required version — prevents reload loops
-    if (sessionStorage.getItem(NUKE_KEY)) return;
-    navigator.serviceWorker.getRegistration().then(function(reg) {
-      if (!reg || !reg.active) return;
-      var ch = new MessageChannel();
-      var timeout = setTimeout(function() {
-        // Old SW without message handler — nuke it once
-        sessionStorage.setItem(NUKE_KEY, "1");
-        reg.unregister().then(function() {
-          caches.keys().then(function(ks) {
-            return Promise.all(ks.filter(function(k){return k.indexOf("paisa-")===0}).map(function(k){return caches.delete(k)}));
-          }).then(function() { location.reload(); });
+    var doReset = location.search.indexOf("reset") !== -1;
+    if (doReset) {
+      // Nuke IndexedDB
+      try { indexedDB.deleteDatabase("PaisaDB"); } catch(e){}
+      // Nuke all SW caches
+      if (window.caches) {
+        caches.keys().then(function(ks){ ks.forEach(function(k){ caches.delete(k); }); });
+      }
+      // Unregister SW
+      if (navigator.serviceWorker) {
+        navigator.serviceWorker.getRegistrations().then(function(regs){
+          regs.forEach(function(r){ r.unregister(); });
         });
-      }, 3000);
-      ch.port1.onmessage = function(e) {
-        clearTimeout(timeout);
-        if (e.data && e.data.type === "VERSION" && e.data.version !== REQUIRED) {
-          sessionStorage.setItem(NUKE_KEY, "1");
-          reg.unregister().then(function() {
-            caches.keys().then(function(ks) {
-              return Promise.all(ks.filter(function(k){return k.indexOf("paisa-")===0}).map(function(k){return caches.delete(k)}));
-            }).then(function() { location.reload(); });
-          });
-        }
-        // Version matches — all good, no action
-      };
-      try { reg.active.postMessage("GET_VERSION", [ch.port2]); } catch(ex) { clearTimeout(timeout); }
-    });
+      }
+      // Clear storage
+      try { localStorage.clear(); sessionStorage.clear(); } catch(e){}
+      // Redirect to clean URL after a beat
+      setTimeout(function(){ location.href = location.pathname; }, 500);
+      document.title = "Paisa — Resetting...";
+      return; // stop everything else from loading
+    }
   })();
   </script>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
 
@@ -211,6 +202,6 @@
   <!-- ═══ Toast ═══ -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>
