@@ -97,6 +97,7 @@ function dbDelete(store, key) {
 /* ── State ── */
 let config = { ...DEFAULT_CONFIG };
 let currentPotId = null;
+let pendingPotBalances = {}; // Collected during setup, applied in finishSetup
 
 /* ── Formatting ── */
 function fmt(n) {
@@ -240,8 +241,9 @@ async function getAllPotBalances() {
 
 /* ═══ SIP ESTIMATION ═══ */
 function estimateSIPValue() {
-  // Count months since October 2026 (first contribution)
-  const start = new Date(2026, 9, 1); // Oct 2026
+  // Count months since setup date (when SIP tracking started)
+  const start = config.setupDate ? new Date(config.setupDate) : new Date();
+  start.setDate(1); // Normalize to 1st of that month
   const now = new Date();
   const months = Math.max(0, (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth()));
 
@@ -291,23 +293,36 @@ async function renderHome() {
     remaining += config.sipPPFAS.amount + config.sipNifty.amount;
   }
 
-  const safeToSpend = hsbc - cc - config.floor - remaining + extraMoney;
-  const spent = config.spendingBudget - safeToSpend;
-  const pct = Math.min(100, Math.max(0, (spent / config.spendingBudget) * 100));
-
   const heroEl = document.getElementById("safe-to-spend");
-  heroEl.textContent = fmt(safeToSpend);
-  heroEl.className = "hero-amount" + (safeToSpend < 5000 ? " danger" : safeToSpend < 15000 ? " warning" : "");
+  const hasSnapshot = snap && (snap.hsbc > 0 || snap.cc > 0);
 
-  const daysLeft = daysLeftInMonth();
-  const dailyBudget = daysLeft > 0 ? Math.round(safeToSpend / daysLeft) : 0;
-  document.getElementById("daily-budget").innerHTML =
-    `~<strong>${fmt(dailyBudget)}</strong>/day for ${daysLeft} days`;
+  if (!hasSnapshot) {
+    // No snapshot yet — show prompt, not garbage numbers
+    heroEl.textContent = "—";
+    heroEl.className = "hero-amount";
+    document.getElementById("daily-budget").innerHTML = "Save a snapshot below to see your budget";
+    document.getElementById("budget-bar").style.width = "0%";
+    document.getElementById("budget-bar").className = "progress-fill green";
+    document.getElementById("budget-used").textContent = "No data yet";
+    document.getElementById("budget-total").textContent = "of " + fmt(config.spendingBudget);
+  } else {
+    const safeToSpend = hsbc - cc - config.floor - remaining + extraMoney;
+    const spent = config.spendingBudget - safeToSpend;
+    const pct = Math.min(100, Math.max(0, (spent / config.spendingBudget) * 100));
 
-  document.getElementById("budget-bar").style.width = pct + "%";
-  document.getElementById("budget-bar").className = "progress-fill " + (pct > 85 ? "red" : pct > 60 ? "yellow" : "green");
-  document.getElementById("budget-used").textContent = fmt(Math.max(0, spent)) + " spent";
-  document.getElementById("budget-total").textContent = "of " + fmt(config.spendingBudget);
+    heroEl.textContent = fmt(safeToSpend);
+    heroEl.className = "hero-amount" + (safeToSpend < 5000 ? " danger" : safeToSpend < 15000 ? " warning" : "");
+
+    const daysLeft = daysLeftInMonth();
+    const dailyBudget = daysLeft > 0 ? Math.round(safeToSpend / daysLeft) : 0;
+    document.getElementById("daily-budget").innerHTML =
+      `~<strong>${fmt(dailyBudget)}</strong>/day for ${daysLeft} days`;
+
+    document.getElementById("budget-bar").style.width = pct + "%";
+    document.getElementById("budget-bar").className = "progress-fill " + (pct > 85 ? "red" : pct > 60 ? "yellow" : "green");
+    document.getElementById("budget-used").textContent = fmt(Math.max(0, spent)) + " spent";
+    document.getElementById("budget-total").textContent = "of " + fmt(config.spendingBudget);
+  }
 
   // Pre-fill inputs with latest snapshot
   if (snap) {
@@ -1173,6 +1188,11 @@ document.getElementById("btn-settings").addEventListener("click", () => {
           <span>₹${p.monthly}/mo ${p.target > 0 ? `→ ${fmt(p.target)}` : ""}</span>
         </div>
       `).join("")}
+    </div>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--glass-border)">
+      <div class="section-label">Danger zone</div>
+      <button type="button" class="btn-secondary btn-sm" id="set-rerun-setup" style="width:100%;margin-bottom:8px">🔄 Re-run setup wizard</button>
+      <button type="button" class="btn-danger btn-sm" id="set-reset-all" style="width:100%">🗑️ Reset all data & start fresh</button>
     </div>`, [
     { label: "Save", primary: true, fn: async () => {
       config.income = parseFloat(document.getElementById("set-income").value) || config.income;
@@ -1186,6 +1206,22 @@ document.getElementById("btn-settings").addEventListener("click", () => {
     }},
     { label: "Cancel" }
   ]);
+
+  // Wire up danger zone buttons after modal renders
+  setTimeout(() => {
+    document.getElementById("set-rerun-setup")?.addEventListener("click", () => {
+      closeModal();
+      config.setupDone = false;
+      saveConfig().then(() => showSetupWizard());
+    });
+    document.getElementById("set-reset-all")?.addEventListener("click", () => {
+      if (confirm("This will delete ALL your data — pots, months, snapshots, everything. Are you sure?")) {
+        closeModal();
+        indexedDB.deleteDatabase(DB_NAME);
+        location.reload();
+      }
+    });
+  }, 50);
 });
 
 /* Export */
@@ -1550,6 +1586,18 @@ function collectSetupData(stepId) {
       break;
     }
 
+    case "balances": {
+      pendingPotBalances = {};
+      overlay.querySelectorAll(".setup-pot-balance").forEach(inp => {
+        const potId = inp.dataset.potId;
+        const amount = parseFloat(inp.value) || 0;
+        if (potId && amount > 0) {
+          pendingPotBalances[potId] = amount;
+        }
+      });
+      break;
+    }
+
     case "sip":
       config.sipPPFAS = {
         name: overlay.querySelector("#setup-sip1-name")?.value.trim() || "SIP Fund 1",
@@ -1588,14 +1636,11 @@ async function advanceSetup(direction) {
 
 async function finishSetup() {
   config.setupDone = true;
+  config.setupDate = new Date().toISOString();
   await saveConfig();
 
-  // Seed starting balances from the balances step
-  const overlay = document.getElementById("setup-overlay");
-  const balInputs = overlay.querySelectorAll(".setup-pot-balance");
-  for (const inp of balInputs) {
-    const potId = inp.dataset.potId;
-    const amount = parseFloat(inp.value) || 0;
+  // Seed starting balances from the collected pendingPotBalances
+  for (const [potId, amount] of Object.entries(pendingPotBalances)) {
     if (amount > 0) {
       await dbPut("potTx", {
         potId, date: new Date().toISOString(),
@@ -1603,9 +1648,11 @@ async function finishSetup() {
       });
     }
   }
+  pendingPotBalances = {};
 
   // Remove overlay, show app
-  overlay.remove();
+  const overlay = document.getElementById("setup-overlay");
+  if (overlay) overlay.remove();
   document.querySelector(".bottom-nav").classList.remove("hidden");
   renderHome();
 }
