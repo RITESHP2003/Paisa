@@ -646,54 +646,84 @@ function previewSplit() {
     hint.classList.add("hidden");
   }
 
-  // Build allocation preview
+  // Build editable allocation rows — no floor (HSBC concept), no spare (folded into spending)
   const allocs = [];
   config.pots.forEach(p => {
-    allocs.push({ label: `${p.icon} ${p.name}`, amount: p.monthly });
+    allocs.push({ id: `split-${p.id}`, label: `${p.icon} ${p.name}`, amount: p.monthly, potId: p.id });
   });
-  allocs.push({ label: "👩 Mother", amount: config.motherAmount });
-  allocs.push({ label: "📈 SIP", amount: config.sipPPFAS.amount + config.sipNifty.amount });
-  allocs.push({ label: "🔒 Floor", amount: config.floor });
-  allocs.push({ label: "🪙 Spare", amount: config.spare });
+  allocs.push({ id: "split-mother", label: "👩 Family transfer", amount: config.motherAmount });
+  allocs.push({ id: "split-sip", label: "📈 SIP", amount: config.sipPPFAS.amount + config.sipNifty.amount });
 
   if (extra > 0) {
-    allocs.push({ label: "🎁 Bonus extra → Emergency", amount: extra });
+    allocs.push({ id: "split-bonus", label: "🎁 Bonus extra", amount: extra, potId: "emergency" });
   }
-
-  const total = allocs.reduce((s, a) => s + a.amount, 0);
-  const spending = salary - total;
 
   const preview = document.getElementById("modal-split-preview");
   preview.innerHTML = `
-    <div class="section-label" style="margin-top:8px">Split plan</div>
-    ${allocs.map(a => `<div class="month-row"><span class="month-row-label">${a.label}</span><span class="month-row-value">${fmt(a.amount)}</span></div>`).join("")}
-    <div class="month-row" style="border-top:1px solid var(--glass-border);margin-top:4px;padding-top:8px">
+    <div class="section-label" style="margin-top:8px">Split plan <span style="font-size:.65rem;font-weight:400;text-transform:none;letter-spacing:0">(edit any amount)</span></div>
+    ${allocs.map(a => `
+      <div class="month-row" style="align-items:center">
+        <span class="month-row-label">${a.label}</span>
+        <input type="number" class="form-input" id="${a.id}" value="${a.amount}" style="width:100px;text-align:right;padding:6px 8px;font-size:.85rem">
+      </div>
+    `).join("")}
+    <div class="month-row" style="border-top:1px solid var(--glass-border);margin-top:8px;padding-top:8px">
       <span class="month-row-label" style="font-weight:700;color:var(--text)">💳 Spending budget</span>
-      <span class="month-row-value" style="color:var(--green)">${fmt(spending)}</span>
+      <span class="month-row-value" style="color:var(--green)" id="split-spending">${fmt(0)}</span>
     </div>`;
+
+  // Live-update spending as user edits allocations
+  const updateSpending = () => {
+    let total = 0;
+    preview.querySelectorAll('input[type="number"]').forEach(inp => {
+      total += parseFloat(inp.value) || 0;
+    });
+    const spending = salary - total;
+    const el = document.getElementById("split-spending");
+    if (el) {
+      el.textContent = fmt(spending);
+      el.style.color = spending < 0 ? "var(--red)" : "var(--green)";
+    }
+  };
+  updateSpending();
+  preview.querySelectorAll('input[type="number"]').forEach(inp => {
+    inp.addEventListener("input", updateSpending);
+  });
 }
 
 async function saveNewMonth() {
   const key = document.getElementById("modal-month-key").value;
   const salary = parseFloat(document.getElementById("modal-salary").value) || config.income;
-  const extra = salary - config.income;
 
+  // Read the actual edited amounts from the split preview inputs
   const allocations = [];
-  config.pots.forEach(p => {
-    allocations.push({ label: `${p.icon} ${p.name}`, potId: p.id, amount: p.monthly });
-  });
-  allocations.push({ label: "👩 Mother", amount: config.motherAmount });
-  allocations.push({ label: "📈 SIP", amount: config.sipPPFAS.amount + config.sipNifty.amount });
-  allocations.push({ label: "🔒 Floor", amount: config.floor });
-  allocations.push({ label: "🪙 Spare", amount: config.spare });
+  let totalAllocated = 0;
 
-  if (extra > 0) {
-    allocations.push({ label: "🎁 Bonus → Emergency", potId: "emergency", amount: extra });
+  config.pots.forEach(p => {
+    const amt = parseFloat(document.getElementById(`split-${p.id}`)?.value) || 0;
+    allocations.push({ label: `${p.icon} ${p.name}`, potId: p.id, amount: amt });
+    totalAllocated += amt;
+  });
+
+  const motherAmt = parseFloat(document.getElementById("split-mother")?.value) || 0;
+  allocations.push({ label: "👩 Family transfer", amount: motherAmt });
+  totalAllocated += motherAmt;
+
+  const sipAmt = parseFloat(document.getElementById("split-sip")?.value) || 0;
+  allocations.push({ label: "📈 SIP", amount: sipAmt });
+  totalAllocated += sipAmt;
+
+  // Bonus extra (if present)
+  const bonusEl = document.getElementById("split-bonus");
+  if (bonusEl) {
+    const bonusAmt = parseFloat(bonusEl.value) || 0;
+    allocations.push({ label: "🎁 Bonus extra", potId: "emergency", amount: bonusAmt });
+    totalAllocated += bonusAmt;
   }
 
-  // Credit pots with monthly amounts
+  // Credit pots with their amounts
   for (const alloc of allocations) {
-    if (alloc.potId) {
+    if (alloc.potId && alloc.amount > 0) {
       await dbPut("potTx", {
         potId: alloc.potId, date: new Date().toISOString(),
         type: "in", amount: alloc.amount,
@@ -702,7 +732,8 @@ async function saveNewMonth() {
     }
   }
 
-  await dbPut("months", { key, salary, allocations, status: "open", createdAt: new Date().toISOString() });
+  const spending = salary - totalAllocated;
+  await dbPut("months", { key, salary, allocations, spending, status: "open", createdAt: new Date().toISOString() });
   toast("Month saved ✓");
   renderMonths();
 }
@@ -1351,15 +1382,15 @@ function renderSetupStep() {
       body = `
         <div class="form-group">
           <label class="form-label">Monthly take-home salary (₹)</label>
-          <input type="number" class="form-input" id="setup-income" value="${config.income || ''}" placeholder="e.g. 95000">
+          <input type="number" class="form-input" id="setup-income" value="${config.income || ''}" placeholder="₹ monthly salary">
         </div>
         <div class="form-group">
           <label class="form-label">Spending budget (₹) — what stays in your account for daily use</label>
-          <input type="number" class="form-input" id="setup-budget" value="${config.spendingBudget || ''}" placeholder="e.g. 46000">
+          <input type="number" class="form-input" id="setup-budget" value="${config.spendingBudget || ''}" placeholder="₹ spending budget">
         </div>
         <div class="form-group">
           <label class="form-label">Floor (₹) — minimum you never touch</label>
-          <input type="number" class="form-input" id="setup-floor" value="${config.floor || ''}" placeholder="e.g. 5000">
+          <input type="number" class="form-input" id="setup-floor" value="${config.floor || ''}" placeholder="₹ floor amount">
         </div>`;
       break;
 
@@ -1367,7 +1398,7 @@ function renderSetupStep() {
       body = `
         <div class="form-group">
           <label class="form-label">Bonus take-home (₹) — leave 0 if no bonus months</label>
-          <input type="number" class="form-input" id="setup-bonus-income" value="${config.bonusIncome || ''}" placeholder="e.g. 104000">
+          <input type="number" class="form-input" id="setup-bonus-income" value="${config.bonusIncome || ''}" placeholder="₹ bonus salary">
         </div>
         <div class="form-group">
           <label class="form-label">Which months? (tap to toggle)</label>
@@ -1387,15 +1418,11 @@ function renderSetupStep() {
         </p>
         <div class="form-group">
           <label class="form-label">Transfer to family/parent (₹/month) — 0 if none</label>
-          <input type="number" class="form-input" id="setup-mother" value="${config.motherAmount || ''}" placeholder="e.g. 3000">
+          <input type="number" class="form-input" id="setup-mother" value="${config.motherAmount || ''}" placeholder="₹ amount">
         </div>
         <div class="form-group">
           <label class="form-label">Transfer day of month</label>
           <input type="number" class="form-input" id="setup-transfer-day" value="${config.transferDay || 2}" placeholder="e.g. 2" min="1" max="28">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Spare change (₹) — leftover rounding</label>
-          <input type="number" class="form-input" id="setup-spare" value="${config.spare || ''}" placeholder="e.g. 21">
         </div>`;
       break;
 
@@ -1440,30 +1467,30 @@ function renderSetupStep() {
         </p>
         <div class="form-group">
           <label class="form-label">SIP Fund 1 — Name</label>
-          <input type="text" class="form-input" id="setup-sip1-name" value="${config.sipPPFAS.name || ''}" placeholder="e.g. PPFAS Flexi Cap">
+          <input type="text" class="form-input" id="setup-sip1-name" value="${config.sipPPFAS.name || ''}" placeholder="Fund name">
         </div>
         <div style="display:flex;gap:10px">
           <div class="form-group" style="flex:1">
             <label class="form-label">Monthly (₹)</label>
-            <input type="number" class="form-input" id="setup-sip1-amt" value="${config.sipPPFAS.amount || ''}" placeholder="e.g. 10000">
+            <input type="number" class="form-input" id="setup-sip1-amt" value="${config.sipPPFAS.amount || ''}" placeholder="₹ per month">
           </div>
           <div class="form-group" style="flex:1">
             <label class="form-label">Expected CAGR (%)</label>
-            <input type="number" class="form-input" id="setup-sip1-cagr" value="${config.sipPPFAS.cagr ? config.sipPPFAS.cagr * 100 : ''}" placeholder="e.g. 15" step="0.5">
+            <input type="number" class="form-input" id="setup-sip1-cagr" value="${config.sipPPFAS.cagr ? config.sipPPFAS.cagr * 100 : ''}" placeholder="%" step="0.5">
           </div>
         </div>
         <div class="form-group" style="margin-top:12px">
           <label class="form-label">SIP Fund 2 — Name</label>
-          <input type="text" class="form-input" id="setup-sip2-name" value="${config.sipNifty.name || ''}" placeholder="e.g. UTI Nifty 50">
+          <input type="text" class="form-input" id="setup-sip2-name" value="${config.sipNifty.name || ''}" placeholder="Fund name">
         </div>
         <div style="display:flex;gap:10px">
           <div class="form-group" style="flex:1">
             <label class="form-label">Monthly (₹)</label>
-            <input type="number" class="form-input" id="setup-sip2-amt" value="${config.sipNifty.amount || ''}" placeholder="e.g. 15000">
+            <input type="number" class="form-input" id="setup-sip2-amt" value="${config.sipNifty.amount || ''}" placeholder="₹ per month">
           </div>
           <div class="form-group" style="flex:1">
             <label class="form-label">Expected CAGR (%)</label>
-            <input type="number" class="form-input" id="setup-sip2-cagr" value="${config.sipNifty.cagr ? config.sipNifty.cagr * 100 : ''}" placeholder="e.g. 12" step="0.5">
+            <input type="number" class="form-input" id="setup-sip2-cagr" value="${config.sipNifty.cagr ? config.sipNifty.cagr * 100 : ''}" placeholder="%" step="0.5">
           </div>
         </div>
         <div class="form-group">
@@ -1568,7 +1595,6 @@ function collectSetupData(stepId) {
     case "split":
       config.motherAmount = parseFloat(overlay.querySelector("#setup-mother")?.value) || 0;
       config.transferDay = parseInt(overlay.querySelector("#setup-transfer-day")?.value) || 2;
-      config.spare = parseFloat(overlay.querySelector("#setup-spare")?.value) || 0;
       break;
 
     case "pots": {
