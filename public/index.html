@@ -7,10 +7,44 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Paisa</title>
+  <script>
+  // Self-healing: nuke stale service workers on load
+  // This runs inline BEFORE any cached app.js, so it works even if the old SW serves old code.
+  (function(){
+    var REQUIRED = "paisa-v3";
+    if (!navigator.serviceWorker) return;
+    navigator.serviceWorker.getRegistration().then(function(reg) {
+      if (!reg || !reg.active) return;
+      // If there's a waiting worker, force it
+      if (reg.waiting) { reg.waiting.postMessage("SKIP_WAITING"); return; }
+      // Ask active SW its version via a try — old SWs without the handler just won't respond
+      var timeout = setTimeout(function() {
+        // No response = old SW without message handler. Nuke it.
+        reg.unregister().then(function() {
+          caches.keys().then(function(ks) {
+            return Promise.all(ks.filter(function(k){return k.indexOf("paisa-")===0}).map(function(k){return caches.delete(k)}));
+          }).then(function() { location.reload(); });
+        });
+      }, 2000);
+      var ch = new MessageChannel();
+      ch.port1.onmessage = function(e) {
+        clearTimeout(timeout);
+        if (e.data && e.data.type === "VERSION" && e.data.version !== REQUIRED) {
+          reg.unregister().then(function() {
+            caches.keys().then(function(ks) {
+              return Promise.all(ks.filter(function(k){return k.indexOf("paisa-")===0}).map(function(k){return caches.delete(k)}));
+            }).then(function() { location.reload(); });
+          });
+        }
+      };
+      try { reg.active.postMessage("GET_VERSION", [ch.port2]); } catch(ex) {}
+    });
+  })();
+  </script>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=2">
+  <link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
 
@@ -175,6 +209,6 @@
   <!-- ═══ Toast ═══ -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=2"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>

@@ -1,9 +1,9 @@
-const CACHE_NAME = "paisa-v2";
+const CACHE_NAME = "paisa-v3";
 const SHELL = [
   "./",
   "index.html",
-  "styles.css?v=2",
-  "app.js?v=2",
+  "styles.css?v=3",
+  "app.js?v=3",
   "manifest.json"
 ];
 
@@ -16,9 +16,8 @@ self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches.keys().then((ks) =>
       Promise.all(ks.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener("fetch", (e) => {
@@ -31,4 +30,14 @@ self.addEventListener("fetch", (e) => {
       })
       .catch(() => caches.match(e.request))
   );
+});
+
+// Force update message from app.js
+self.addEventListener("message", (e) => {
+  if (e.data === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+  if (e.data === "GET_VERSION") {
+    e.source.postMessage({ type: "VERSION", version: CACHE_NAME });
+  }
 });
