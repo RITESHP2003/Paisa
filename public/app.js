@@ -1676,9 +1676,8 @@ const APP_CACHE_VERSION = "paisa-v3";
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").then(reg => {
-    // Check for updates immediately, then every 60s
-    reg.update();
-    setInterval(() => reg.update(), 60000);
+    // Check for updates every 5 min (not 60s — avoids churn)
+    setInterval(() => reg.update(), 300000);
 
     // When a new SW is found waiting, force it to activate
     reg.addEventListener("updatefound", () => {
@@ -1686,38 +1685,21 @@ if ("serviceWorker" in navigator) {
       if (!newWorker) return;
       newWorker.addEventListener("statechange", () => {
         if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-          // New version ready — tell it to take over
           newWorker.postMessage("SKIP_WAITING");
         }
       });
     });
   });
 
-  // When the new SW takes control, reload to get fresh assets
+  // When the new SW takes control, reload ONCE to get fresh assets
   let refreshing = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (refreshing) return;
+    // Only reload if we aren't already on the right version
+    if (sessionStorage.getItem("paisa-sw-refreshed") === APP_CACHE_VERSION) return;
     refreshing = true;
+    sessionStorage.setItem("paisa-sw-refreshed", APP_CACHE_VERSION);
     window.location.reload();
-  });
-
-  // On load, check if current SW is outdated
-  navigator.serviceWorker.ready.then(reg => {
-    if (reg.active) {
-      // Ask the SW its version
-      const ch = new MessageChannel();
-      ch.port1.onmessage = (e) => {
-        if (e.data && e.data.type === "VERSION" && e.data.version !== APP_CACHE_VERSION) {
-          // SW is old — unregister and force reload
-          console.log(`[Paisa] SW version mismatch: ${e.data.version} vs ${APP_CACHE_VERSION}, forcing update`);
-          reg.unregister().then(() => {
-            caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith("paisa-")).map(k => caches.delete(k))))
-              .then(() => window.location.reload());
-          });
-        }
-      };
-      reg.active.postMessage("GET_VERSION", [ch.port2]);
-    }
   });
 }
 

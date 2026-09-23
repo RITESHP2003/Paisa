@@ -8,36 +8,38 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Paisa</title>
   <script>
-  // Self-healing: nuke stale service workers on load
-  // This runs inline BEFORE any cached app.js, so it works even if the old SW serves old code.
+  // Self-healing: nuke stale service workers — runs once per version bump
   (function(){
     var REQUIRED = "paisa-v3";
+    var NUKE_KEY = "paisa-nuke-" + REQUIRED;
     if (!navigator.serviceWorker) return;
+    // Only run the nuke once per required version — prevents reload loops
+    if (sessionStorage.getItem(NUKE_KEY)) return;
     navigator.serviceWorker.getRegistration().then(function(reg) {
       if (!reg || !reg.active) return;
-      // If there's a waiting worker, force it
-      if (reg.waiting) { reg.waiting.postMessage("SKIP_WAITING"); return; }
-      // Ask active SW its version via a try — old SWs without the handler just won't respond
+      var ch = new MessageChannel();
       var timeout = setTimeout(function() {
-        // No response = old SW without message handler. Nuke it.
+        // Old SW without message handler — nuke it once
+        sessionStorage.setItem(NUKE_KEY, "1");
         reg.unregister().then(function() {
           caches.keys().then(function(ks) {
             return Promise.all(ks.filter(function(k){return k.indexOf("paisa-")===0}).map(function(k){return caches.delete(k)}));
           }).then(function() { location.reload(); });
         });
-      }, 2000);
-      var ch = new MessageChannel();
+      }, 3000);
       ch.port1.onmessage = function(e) {
         clearTimeout(timeout);
         if (e.data && e.data.type === "VERSION" && e.data.version !== REQUIRED) {
+          sessionStorage.setItem(NUKE_KEY, "1");
           reg.unregister().then(function() {
             caches.keys().then(function(ks) {
               return Promise.all(ks.filter(function(k){return k.indexOf("paisa-")===0}).map(function(k){return caches.delete(k)}));
             }).then(function() { location.reload(); });
           });
         }
+        // Version matches — all good, no action
       };
-      try { reg.active.postMessage("GET_VERSION", [ch.port2]); } catch(ex) {}
+      try { reg.active.postMessage("GET_VERSION", [ch.port2]); } catch(ex) { clearTimeout(timeout); }
     });
   })();
   </script>
