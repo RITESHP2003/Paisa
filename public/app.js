@@ -127,7 +127,7 @@ function fmt(n) {
 function fmtDate(d) { return new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); }
 function monthKey(d) { const dt = d ? new Date(d) : new Date(); return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}`; }
 function monthLabel(key) { const [y,m] = key.split("-"); return new Date(y, m-1).toLocaleDateString("en-IN", { month: "long", year: "numeric" }); }
-function daysLeftInMonth() { const n = new Date(); return new Date(n.getFullYear(), n.getMonth()+1, 0).getDate() - n.getDate(); }
+function daysLeftInMonth() { const n = new Date(); return new Date(n.getFullYear(), n.getMonth()+1, 0).getDate() - n.getDate() + 1; } // +1 includes today
 function ordinal(n) { const s=["th","st","nd","rd"]; const v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
 function toast(msg) { const el=document.getElementById("toast"); el.textContent=msg; el.classList.remove("hidden"); setTimeout(()=>el.classList.add("hidden"),2200); }
 
@@ -287,7 +287,7 @@ async function renderHome() {
   } else {
     const safeToSpend = hsbc - cc - config.floor - remaining + extraMoney;
     const spent = config.spendingBudget - safeToSpend;
-    const pct = Math.min(100, Math.max(0, (spent/config.spendingBudget)*100));
+    const pct = config.spendingBudget > 0 ? Math.min(100, Math.max(0, (spent/config.spendingBudget)*100)) : 0;
     heroEl.textContent = fmt(safeToSpend);
     heroEl.className = "hero-amount" + (safeToSpend < 5000 ? " danger" : safeToSpend < 15000 ? " warning" : "");
     const daysLeft = daysLeftInMonth();
@@ -768,8 +768,9 @@ async function renderMoney() {
   const statsEl = document.getElementById("trend-stats");
   const monthCount = months.length||1;
   const avgSavings = Math.round(totalPots/monthCount);
-  const savingsRate = months.length > 0
-    ? Math.round((months.reduce((s,m)=>{return s+(m.allocations||[]).filter(a=>a.potId).reduce((ss,a)=>ss+a.amount,0)},0)/months.reduce((s,m)=>s+m.salary,0))*100) : 0;
+  const totalSalary = months.reduce((s,m)=>s+m.salary,0);
+  const savingsRate = totalSalary > 0
+    ? Math.round((months.reduce((s,m)=>{return s+(m.allocations||[]).filter(a=>a.potId).reduce((ss,a)=>ss+a.amount,0)},0)/totalSalary)*100) : 0;
   statsEl.innerHTML = `
     <div class="stat-card"><div class="stat-value">${fmt(netWorth)}</div><div class="stat-label">Net worth</div></div>
     <div class="stat-card"><div class="stat-value">${fmt(sipInfo.totalInvested)}</div><div class="stat-label">SIP invested</div></div>
@@ -1235,7 +1236,14 @@ async function checkAfford() {
   const amount=parseFloat(document.getElementById("afford-amount").value)||0;
   if(amount<=0) return;
   const snap=await getLatestSnapshot();
-  const safeToSpend=(snap?snap.hsbc:0)-(snap?snap.cc:0)-config.floor;
+  const hsbc=snap?snap.hsbc:0;
+  const cc=snap?snap.cc:0;
+  const extraMoney=snap?(snap.extra||0):0;
+  const today=new Date().getDate();
+  let remaining=0;
+  if(today<config.transferDay) remaining+=config.pots.reduce((s,p)=>s+p.monthly,0)+config.motherAmount;
+  if(today<config.sipDay) remaining+=(config.sips||[]).reduce((s,f)=>s+f.amount,0);
+  const safeToSpend=hsbc-cc-config.floor-remaining+extraMoney;
   const resultEl=document.getElementById("afford-result");
   if(amount<=safeToSpend*0.3) resultEl.innerHTML=`<div class="afford-verdict" style="color:var(--green)">✅ Easily!</div><div class="afford-detail">That's only ${Math.round(amount/safeToSpend*100)}% of your safe-to-spend. You'll still have ${fmt(safeToSpend-amount)} left.</div>`;
   else if(amount<=safeToSpend) resultEl.innerHTML=`<div class="afford-verdict" style="color:var(--yellow)">⚠️ Yes, but it's a big chunk</div><div class="afford-detail">That's ${Math.round(amount/safeToSpend*100)}% of safe-to-spend. Daily budget drops to ~${fmt(Math.round((safeToSpend-amount)/daysLeftInMonth()))}/day.</div>`;
