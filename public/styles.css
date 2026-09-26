@@ -299,3 +299,42 @@ select.form-input{appearance:none;background-image:url("data:image/svg+xml,%3Csv
 /* ── Edit Inline ── */
 .editable{cursor:pointer;border-bottom:1px dashed var(--text-dim);transition:border-color .2s}
 .editable:hover{border-color:var(--accent)}
+
+/* ── Loan Cards ── */
+.loan-card{
+  background:var(--surface);border:1px solid var(--glass-border);
+  border-radius:14px;padding:14px;margin-bottom:10px;
+  cursor:pointer;touch-action:manipulation;transition:transform .15s
+}
+.loan-card:active{transform:scale(.97)}
+.loan-card .loan-title{font-size:.85rem;font-weight:700}
+.loan-card .loan-meta{font-size:.72rem;color:var(--text-muted);margin-top:4px}
+.loan-card .loan-amount{font-size:1.05rem;font-weight:700;color:var(--orange);margin-top:4px}
+.loan-card.paid{opacity:.6;border-color:var(--green)}
+.loan-card.paid .loan-amount{color:var(--green)}
+.loan-reminder{
+  background:rgba(251,146,60,0.08);border:1px solid rgba(251,146,60,0.25);
+  border-radius:14px;padding:12px;margin-top:10px
+}
+.loan-reminder .reminder-title{font-size:.82rem;font-weight:700;color:var(--orange)}
+.loan-reminder .reminder-detail{font-size:.75rem;color:var(--text-muted);margin-top:4px;line-height:1.4}
+
+/* ── Extra Money Log Items ── */
+.extra-item{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 14px;border-bottom:1px solid var(--glass-border);
+  cursor:pointer;touch-action:manipulation
+}
+.extra-item:last-child{border-bottom:none}
+.extra-item:active{background:var(--glass)}
+
+/* ── Installment row ── */
+.installment-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 0;border-bottom:1px solid var(--glass-border)
+}
+.installment-row:last-child{border-bottom:none}
+.installment-status{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.9rem}
+.installment-status.pending{background:var(--orange-dim);color:var(--orange)}
+.installment-status.paid{background:var(--green-dim);color:var(--green)}
+.installment-status.overdue{background:var(--red-dim);color:var(--red)}

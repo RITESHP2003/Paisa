@@ -9,44 +9,31 @@
   <title>Paisa</title>
   <script>
   // Escape hatch: visit ?reset to nuke everything and start fresh
-  // Shows a confirmation first to prevent accidental resets
+  // Requires typing RESET to confirm — prevents accidental triggers
   (function(){
-    var doReset = location.search.indexOf("reset") !== -1;
-    if (doReset) {
-      if (!confirm("⚠️ This will delete ALL your Paisa data — pots, months, snapshots, everything.\n\nAre you sure?")) {
-        // User cancelled — redirect to clean URL
-        location.href = location.pathname;
-        return;
-      }
-      // Nuke IndexedDB
-      try { indexedDB.deleteDatabase("PaisaDB"); } catch(e){}
-      // Nuke all SW caches
-      if (window.caches) {
-        caches.keys().then(function(ks){ ks.forEach(function(k){ caches.delete(k); }); });
-      }
-      // Unregister SW
-      if (navigator.serviceWorker) {
-        navigator.serviceWorker.getRegistrations().then(function(regs){
-          regs.forEach(function(r){ r.unregister(); });
-        });
-      }
-      // Clear storage
-      try { localStorage.clear(); sessionStorage.clear(); } catch(e){}
-      // Redirect to clean URL after a beat
-      setTimeout(function(){ location.href = location.pathname; }, 500);
-      document.title = "Paisa — Resetting...";
-      return; // stop everything else from loading
+    if (location.search.indexOf("reset") === -1) return;
+    var answer = prompt("⚠️ This will DELETE all your Paisa data — pots, months, snapshots, loans, everything.\n\nType RESET to confirm:");
+    if (!answer || answer.trim().toUpperCase() !== "RESET") {
+      alert("Reset cancelled.");
+      location.href = location.pathname;
+      return;
     }
+    try { indexedDB.deleteDatabase("PaisaDB"); } catch(e){}
+    if (window.caches) { caches.keys().then(function(ks){ ks.forEach(function(k){ caches.delete(k); }); }); }
+    if (navigator.serviceWorker) { navigator.serviceWorker.getRegistrations().then(function(regs){ regs.forEach(function(r){ r.unregister(); }); }); }
+    try { localStorage.clear(); sessionStorage.clear(); } catch(e){}
+    setTimeout(function(){ location.href = location.pathname; }, 500);
+    document.title = "Paisa — Resetting...";
   })();
   </script>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
 
-  <!-- ═══ Screen 1: HOME ═══ -->
+  <!-- ═══ Screen 1: HOME (lean — glance-and-go) ═══ -->
   <div id="screen-home" class="screen">
     <div class="page-header">
       <div>
@@ -63,7 +50,7 @@
       <div class="progress-bar"><div class="progress-fill green" id="budget-bar" style="width:0%"></div></div>
       <div class="progress-label">
         <span id="budget-used">₹0 spent</span>
-        <span id="budget-total">of ₹46,000</span>
+        <span id="budget-total">of ₹0</span>
       </div>
     </div>
 
@@ -86,9 +73,41 @@
       </div>
     </div>
 
-    <!-- Pots Summary -->
-    <div class="section-label">Pots</div>
-    <div class="pot-grid" id="pot-grid"></div>
+    <!-- Extra Money Log (shown when entries exist) -->
+    <div id="extra-money-section" class="hidden">
+      <div class="section-label" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Extra money this month</span>
+        <span id="extra-total" style="color:var(--green);font-weight:700"></span>
+      </div>
+      <div class="glass-card" style="padding:0;overflow:hidden" id="extra-money-list"></div>
+    </div>
+
+    <!-- New Month Prompt (injected dynamically) -->
+
+    <!-- Loan Reminders (injected dynamically) -->
+    <div id="loan-reminders"></div>
+  </div>
+
+  <!-- ═══ Screen 2: MONTHS ═══ -->
+  <div id="screen-months" class="screen hidden">
+    <div class="page-header">
+      <div>
+        <div class="page-title">📅 Months</div>
+        <div class="page-subtitle">Salary → split → track</div>
+      </div>
+      <button class="btn-primary btn-sm" id="btn-new-month">+ New month</button>
+    </div>
+    <div id="months-list"></div>
+  </div>
+
+  <!-- ═══ Screen 3: MONEY (pots + net worth + loans + SIP + trends) ═══ -->
+  <div id="screen-money" class="screen hidden">
+    <div class="page-header">
+      <div>
+        <div class="page-title">💎 Money</div>
+        <div class="page-subtitle">Pots, loans & growth</div>
+      </div>
+    </div>
 
     <!-- Net Worth -->
     <div class="networth-card" id="networth-card">
@@ -96,9 +115,34 @@
       <div class="networth-amount" id="networth-amount">₹—</div>
       <div class="networth-breakdown" id="networth-breakdown"></div>
     </div>
+
+    <!-- Pots Grid -->
+    <div class="section-label">Savings pots</div>
+    <div class="pot-grid" id="pot-grid"></div>
+
+    <!-- Loans Section -->
+    <div class="section-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Loans</span>
+      <button class="btn-secondary btn-sm" id="btn-new-loan" style="font-size:.7rem;padding:4px 10px">+ New loan</button>
+    </div>
+    <div id="loans-list"></div>
+
+    <!-- SIP Portfolio -->
+    <div class="section-label">SIP portfolio</div>
+    <div class="glass-card" id="sip-card"></div>
+
+    <!-- Trends/Charts -->
+    <div class="section-label">Trends</div>
+    <div class="stat-grid" id="trend-stats"></div>
+    <div style="margin-top:12px">
+      <div class="section-label">Net worth over time</div>
+      <div class="glass-card"><canvas class="chart-canvas" id="chart-networth"></canvas></div>
+      <div class="section-label">Monthly spending</div>
+      <div class="glass-card"><canvas class="chart-canvas" id="chart-spending"></canvas></div>
+    </div>
   </div>
 
-  <!-- ═══ Screen 2: POT DETAIL ═══ -->
+  <!-- ═══ Screen: POT DETAIL ═══ -->
   <div id="screen-pot" class="screen hidden">
     <div class="pot-detail-header">
       <button class="back-btn" id="pot-back">← <span>Pots</span></button>
@@ -115,38 +159,21 @@
     <div class="tx-list" id="pot-tx-list"></div>
   </div>
 
-  <!-- ═══ Screen 3: MONTHS ═══ -->
-  <div id="screen-months" class="screen hidden">
-    <div class="page-header">
-      <div>
-        <div class="page-title">📅 Months</div>
-        <div class="page-subtitle">Salary → split → track</div>
-      </div>
-      <button class="btn-primary btn-sm" id="btn-new-month">+ New month</button>
+  <!-- ═══ Screen: LOAN DETAIL ═══ -->
+  <div id="screen-loan" class="screen hidden">
+    <div class="pot-detail-header">
+      <button class="back-btn" id="loan-back">← <span>Loans</span></button>
+      <div id="loan-detail-title" style="font-size:1.1rem;font-weight:700;margin-top:4px"></div>
+      <div class="pot-detail-balance" id="loan-detail-remaining">₹0</div>
+      <div class="pot-detail-target" id="loan-detail-info"></div>
+      <div class="progress-bar"><div class="progress-fill accent" id="loan-bar" style="width:0%"></div></div>
+      <div class="pot-eta" id="loan-eta"></div>
     </div>
-    <div id="months-list"></div>
+    <div class="section-label">Installments</div>
+    <div class="tx-list" id="loan-installments-list"></div>
   </div>
 
-  <!-- ═══ Screen 4: TRENDS ═══ -->
-  <div id="screen-trends" class="screen hidden">
-    <div class="page-header">
-      <div>
-        <div class="page-title">📊 Trends</div>
-        <div class="page-subtitle">Growth over time</div>
-      </div>
-    </div>
-    <div class="stat-grid" id="trend-stats"></div>
-    <div class="section-label">Net worth over time</div>
-    <div class="glass-card"><canvas class="chart-canvas" id="chart-networth"></canvas></div>
-    <div class="section-label">Monthly spending</div>
-    <div class="glass-card"><canvas class="chart-canvas" id="chart-spending"></canvas></div>
-    <div class="section-label">Pot growth</div>
-    <div class="glass-card"><canvas class="chart-canvas" id="chart-pots"></canvas></div>
-    <div class="section-label">SIP portfolio</div>
-    <div class="glass-card" id="sip-card"></div>
-  </div>
-
-  <!-- ═══ Screen 5: MORE ═══ -->
+  <!-- ═══ Screen 4: MORE ═══ -->
   <div id="screen-more" class="screen hidden">
     <div class="page-header">
       <div class="page-title">⚙️ More</div>
@@ -193,8 +220,8 @@
     <button class="nav-item" data-screen="months">
       <span class="nav-icon">📅</span>Months
     </button>
-    <button class="nav-item" data-screen="trends">
-      <span class="nav-icon">📊</span>Trends
+    <button class="nav-item" data-screen="money">
+      <span class="nav-icon">💎</span>Money
     </button>
     <button class="nav-item" data-screen="more">
       <span class="nav-icon">⚙️</span>More
@@ -207,6 +234,6 @@
   <!-- ═══ Toast ═══ -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

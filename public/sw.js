@@ -1,9 +1,9 @@
-const CACHE_NAME = "paisa-v6";
+const CACHE_NAME = "paisa-v7";
 const SHELL = [
   "./",
   "index.html",
-  "styles.css?v=6",
-  "app.js?v=6",
+  "styles.css?v=7",
+  "app.js?v=7",
   "manifest.json"
 ];
 
