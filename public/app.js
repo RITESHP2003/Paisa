@@ -4,7 +4,7 @@
    ═══════════════════════════════════════════ */
 "use strict";
 
-const APP_VERSION = 3;
+const APP_VERSION = 4;
 
 /* ── Default Config (no personal data — filled during first-run setup) ── */
 const DEFAULT_CONFIG = {
@@ -13,8 +13,7 @@ const DEFAULT_CONFIG = {
   bonusMonths: [],
   floor: 0,
   spendingBudget: 0,
-  sipPPFAS: { amount: 0, cagr: 0.12, name: "SIP Fund 1" },
-  sipNifty: { amount: 0, cagr: 0.12, name: "SIP Fund 2" },
+  sips: [], // [{id, name, amount, day}]
   sipDay: 3,
   transferDay: 2,
   pots: [],
@@ -189,8 +188,19 @@ async function loadConfig() {
   if (saved) {
     config = { ...DEFAULT_CONFIG, ...saved };
     if (saved.pots) config.pots = saved.pots;
-    if (saved.sipPPFAS) config.sipPPFAS = { ...DEFAULT_CONFIG.sipPPFAS, ...saved.sipPPFAS };
-    if (saved.sipNifty) config.sipNifty = { ...DEFAULT_CONFIG.sipNifty, ...saved.sipNifty };
+    if (saved.sips) config.sips = saved.sips;
+    // Migrate old sipPPFAS/sipNifty format to new sips array
+    if (!saved.sips && (saved.sipPPFAS || saved.sipNifty)) {
+      config.sips = [];
+      if (saved.sipPPFAS && saved.sipPPFAS.amount > 0) {
+        config.sips.push({ id: "sip-1", name: saved.sipPPFAS.name || "SIP Fund 1", amount: saved.sipPPFAS.amount });
+      }
+      if (saved.sipNifty && saved.sipNifty.amount > 0) {
+        config.sips.push({ id: "sip-2", name: saved.sipNifty.name || "SIP Fund 2", amount: saved.sipNifty.amount });
+      }
+      // Save migration
+      await saveConfig();
+    }
   }
 }
 async function saveConfig() { await dbPut("config", config, "main"); }
@@ -205,15 +215,21 @@ async function getAllPotBalances() {
   for (const pot of config.pots) result[pot.id] = await getPotBalance(pot.id);
   return result;
 }
-function estimateSIPValue() {
+function getSIPSummary() {
   const start = config.setupDate ? new Date(config.setupDate) : new Date();
   start.setDate(1);
   const now = new Date();
   const months = Math.max(0, (now.getFullYear()-start.getFullYear())*12 + (now.getMonth()-start.getMonth()));
-  function fv(amt, rate, n) { if (n<=0) return 0; const r=rate/12; return amt*((Math.pow(1+r,n)-1)/r)*(1+r); }
-  const ppfas = fv(config.sipPPFAS.amount, config.sipPPFAS.cagr, months);
-  const nifty = fv(config.sipNifty.amount, config.sipNifty.cagr, months);
-  return { ppfas: Math.round(ppfas), nifty: Math.round(nifty), total: Math.round(ppfas+nifty) };
+  const sips = config.sips || [];
+  let totalMonthly = 0;
+  let totalInvested = 0;
+  const funds = sips.map(s => {
+    const invested = s.amount * months;
+    totalMonthly += s.amount;
+    totalInvested += invested;
+    return { ...s, invested, months };
+  });
+  return { funds, totalMonthly, totalInvested, months };
 }
 async function getLatestSnapshot() {
   const all = await dbGetAll("snapshots");
@@ -237,7 +253,7 @@ async function renderHome() {
   if (today < config.transferDay) {
     remaining += config.pots.reduce((s,p)=>s+p.monthly,0) + config.motherAmount;
   }
-  if (today < config.sipDay) remaining += config.sipPPFAS.amount + config.sipNifty.amount;
+  if (today < config.sipDay) remaining += (config.sips||[]).reduce((s,f)=>s+f.amount,0);
 
   const heroEl = document.getElementById("safe-to-spend");
   const hasSnapshot = snap && (snap.hsbc > 0 || snap.cc > 0);
@@ -349,6 +365,10 @@ async function checkNewMonthPrompt(snap) {
   const existing = await dbGet("months", key);
   if (existing) { if (promptEl) promptEl.remove(); return; }
 
+  // Don't prompt for the month the app was set up in — that's already handled by initial setup
+  const setupKey = config.setupDate ? monthKey(config.setupDate) : null;
+  if (setupKey && key === setupKey) { if (promptEl) promptEl.remove(); return; }
+
   if (!promptEl) {
     promptEl = document.createElement("div");
     promptEl.id = "new-month-prompt";
@@ -377,7 +397,7 @@ async function checkNewMonthPrompt(snap) {
       <br><br><strong>Transfers needed:</strong><br>
       → ${fmt(sbiTotal)} to SBI (pots) on the ${ordinal(config.transferDay)}<br>
       → ${fmt(config.motherAmount)} to family on the ${ordinal(config.transferDay)}<br>
-      → ${fmt(config.sipPPFAS.amount+config.sipNifty.amount)} SIP auto-debit on the ${ordinal(config.sipDay)}
+      → ${fmt((config.sips||[]).reduce((s,f)=>s+f.amount,0))} SIP auto-debit on the ${ordinal(config.sipDay)}
     </div>
     <button class="btn-primary btn-sm" id="btn-setup-month" style="width:100%">Set up ${monthLabel(key).split(" ")[0]}</button>`;
   promptEl.querySelector("#btn-setup-month").addEventListener("click", () => {
@@ -597,7 +617,7 @@ function previewSplit() {
   const allocs = [];
   config.pots.forEach(p => allocs.push({id:`split-${p.id}`,label:`${p.icon} ${p.name}`,amount:p.monthly,potId:p.id}));
   allocs.push({id:"split-mother",label:"👩 Family transfer",amount:config.motherAmount});
-  allocs.push({id:"split-sip",label:"📈 SIP",amount:config.sipPPFAS.amount+config.sipNifty.amount});
+  allocs.push({id:"split-sip",label:"📈 SIP",amount:(config.sips||[]).reduce((s,f)=>s+f.amount,0)});
   if (extra>0) allocs.push({id:"split-bonus",label:"🎁 Bonus extra",amount:extra,potId:"emergency"});
 
   const preview = document.getElementById("modal-split-preview");
@@ -685,8 +705,8 @@ function closeMonth(key) {
 async function renderMoney() {
   const potBals = await getAllPotBalances();
   const totalPots = Object.values(potBals).reduce((s,v)=>s+v,0);
-  const sip = estimateSIPValue();
-  const netWorth = totalPots + sip.total;
+  const sipInfo = getSIPSummary();
+  const netWorth = totalPots + sipInfo.totalInvested;
   const months = await dbGetAll("months");
   months.sort((a,b)=>a.key.localeCompare(b.key));
 
@@ -694,7 +714,7 @@ async function renderMoney() {
   document.getElementById("networth-amount").textContent = fmt(netWorth);
   document.getElementById("networth-breakdown").innerHTML = `
     <div class="networth-item">Pots<strong>${fmt(totalPots)}</strong></div>
-    <div class="networth-item">SIP (est.)<strong>${fmt(sip.total)}</strong></div>`;
+    <div class="networth-item">SIP invested<strong>${fmt(sipInfo.totalInvested)}</strong></div>`;
 
   // Pots grid
   const grid = document.getElementById("pot-grid");
@@ -716,7 +736,7 @@ async function renderMoney() {
   await renderLoans();
 
   // SIP card
-  renderSIPCard(sip);
+  renderSIPCard(sipInfo);
 
   // Stats
   const statsEl = document.getElementById("trend-stats");
@@ -726,28 +746,99 @@ async function renderMoney() {
     ? Math.round((months.reduce((s,m)=>{return s+(m.allocations||[]).filter(a=>a.potId).reduce((ss,a)=>ss+a.amount,0)},0)/months.reduce((s,m)=>s+m.salary,0))*100) : 0;
   statsEl.innerHTML = `
     <div class="stat-card"><div class="stat-value">${fmt(netWorth)}</div><div class="stat-label">Net worth</div></div>
-    <div class="stat-card"><div class="stat-value">${fmt(sip.total)}</div><div class="stat-label">SIP portfolio</div></div>
+    <div class="stat-card"><div class="stat-value">${fmt(sipInfo.totalInvested)}</div><div class="stat-label">SIP invested</div></div>
     <div class="stat-card"><div class="stat-value">${fmt(avgSavings)}</div><div class="stat-label">Avg monthly saved</div></div>
     <div class="stat-card"><div class="stat-value">${savingsRate}%</div><div class="stat-label">Savings rate</div></div>`;
 
   // Charts
-  renderLineChart("chart-networth", months, potBals, sip);
+  renderLineChart("chart-networth", months, potBals);
   renderSpendingChart("chart-spending", months);
 }
 
-function renderSIPCard(sip) {
+function renderSIPCard(sipInfo) {
   const card = document.getElementById("sip-card");
-  const s1=config.sipPPFAS, s2=config.sipNifty;
-  if (s1.amount===0 && s2.amount===0) { card.innerHTML='<div style="padding:16px;text-align:center;color:var(--text-dim);font-size:.85rem">No SIPs configured. Add them in Settings.</div>'; return; }
-  card.innerHTML = `<div style="padding:16px">
-    <div style="display:flex;justify-content:space-between;margin-bottom:12px">
-      ${s1.amount>0?`<div><div style="font-size:.75rem;color:var(--text-muted)">${s1.name}</div><div style="font-size:1.1rem;font-weight:700">${fmt(sip.ppfas)}</div><div style="font-size:.68rem;color:var(--text-dim)">${fmt(s1.amount)}/mo · ~${Math.round(s1.cagr*100)}% CAGR</div></div>`:''}
-      ${s2.amount>0?`<div style="text-align:right"><div style="font-size:.75rem;color:var(--text-muted)">${s2.name}</div><div style="font-size:1.1rem;font-weight:700">${fmt(sip.nifty)}</div><div style="font-size:.68rem;color:var(--text-dim)">${fmt(s2.amount)}/mo · ~${Math.round(s2.cagr*100)}% CAGR</div></div>`:''}
-    </div>
-    <div style="text-align:center;padding-top:8px;border-top:1px solid var(--glass-border)">
-      <div style="font-size:.72rem;color:var(--accent2)">Total SIP portfolio (estimated)</div>
-      <div style="font-size:1.5rem;font-weight:800">${fmt(sip.total)}</div></div></div>`;
+  const sips = config.sips || [];
+
+  if (!sips.length) {
+    card.innerHTML = `<div style="padding:16px;text-align:center">
+      <div style="color:var(--text-dim);font-size:.85rem;margin-bottom:10px">No SIPs added yet</div>
+      <button class="btn-secondary btn-sm" id="sip-add-empty" style="width:100%">+ Add SIP fund</button>
+    </div>`;
+    setTimeout(() => {
+      document.getElementById("sip-add-empty")?.addEventListener("click", () => showSIPModal());
+    }, 50);
+    return;
+  }
+
+  let html = '<div style="padding:12px">';
+  sips.forEach((s, idx) => {
+    const invested = s.amount * sipInfo.months;
+    html += `
+      <div class="sip-fund-row" data-sip-idx="${idx}" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;${idx>0?'border-top:1px solid var(--glass-border)':''}cursor:pointer">
+        <div>
+          <div style="font-size:.85rem;font-weight:600">📈 ${s.name}</div>
+          <div style="font-size:.72rem;color:var(--text-muted)">${fmt(s.amount)}/month · Auto-debit ${ordinal(config.sipDay)}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:1rem;font-weight:700">${fmt(invested)}</div>
+          <div style="font-size:.65rem;color:var(--text-dim)">${sipInfo.months} month${sipInfo.months!==1?'s':''} invested</div>
+        </div>
+      </div>`;
+  });
+
+  html += `<div style="text-align:center;padding-top:10px;border-top:1px solid var(--glass-border);margin-top:4px">
+    <div style="font-size:.72rem;color:var(--accent2)">Total SIP invested</div>
+    <div style="font-size:1.3rem;font-weight:800">${fmt(sipInfo.totalInvested)}</div>
+    <div style="font-size:.68rem;color:var(--text-dim);margin-top:2px">${fmt(sipInfo.totalMonthly)}/month total</div>
+  </div>`;
+
+  html += `<button class="btn-secondary btn-sm" id="sip-add-btn" style="width:100%;margin-top:10px">+ Add SIP fund</button>`;
+  html += '</div>';
+  card.innerHTML = html;
+
+  // Wire tap-to-edit
+  setTimeout(() => {
+    card.querySelectorAll(".sip-fund-row").forEach(row => {
+      row.addEventListener("click", () => {
+        const idx = parseInt(row.dataset.sipIdx);
+        showSIPEditModal(idx);
+      });
+    });
+    document.getElementById("sip-add-btn")?.addEventListener("click", () => showSIPModal());
+  }, 50);
 }
+
+function showSIPModal(existingIdx) {
+  const isEdit = existingIdx != null;
+  const sip = isEdit ? config.sips[existingIdx] : { name: "", amount: 0 };
+  const title = isEdit ? "Edit SIP fund" : "Add SIP fund";
+
+  showModal(title, `
+    <div class="form-group"><label class="form-label">Fund name</label>
+      <input type="text" class="form-input" id="modal-sip-name" value="${sip.name}" placeholder="Fund name"></div>
+    <div class="form-group"><label class="form-label">Monthly amount (₹)</label>
+      <input type="number" class="form-input" id="modal-sip-amt" value="${sip.amount||''}" placeholder="₹ per month"></div>`, [
+    { label: isEdit ? "Save" : "Add", primary: true, fn: async () => {
+      const name = document.getElementById("modal-sip-name").value.trim();
+      const amount = parseFloat(document.getElementById("modal-sip-amt").value) || 0;
+      if (!name) { toast("Enter a fund name"); return; }
+      if (amount <= 0) { toast("Enter an amount"); return; }
+      if (isEdit) {
+        config.sips[existingIdx] = { ...config.sips[existingIdx], name, amount };
+      } else {
+        config.sips.push({ id: "sip-" + Date.now(), name, amount });
+      }
+      await saveConfig(); toast(isEdit ? "Updated ✓" : "Added ✓"); renderMoney();
+    }},
+    ...(isEdit ? [{ label: "Delete", danger: true, fn: async () => {
+      config.sips.splice(existingIdx, 1);
+      await saveConfig(); toast("Deleted"); renderMoney();
+    }}] : []),
+    { label: "Cancel" }
+  ]);
+}
+
+function showSIPEditModal(idx) { showSIPModal(idx); }
 
 /* ═══════════════════════════════════════
    LOANS FEATURE
@@ -981,7 +1072,7 @@ async function renderLoanReminders() {
 }
 
 /* ═══ CHARTS ═══ */
-function renderLineChart(canvasId, months, potBals, sipNow) {
+function renderLineChart(canvasId, months, potBals) {
   const canvas = document.getElementById(canvasId); if(!canvas) return;
   const ctx = canvas.getContext("2d");
   const w = canvas.parentElement.clientWidth; const h = 200;
@@ -1253,7 +1344,21 @@ function renderSetupStep(){
       const pots=config.pots.length>0?config.pots:[];
       if(!pots.length) body=`<p style="color:var(--text-dim);text-align:center;padding:24px">No pots set up — go back and add some.</p>`;
       else body=`<p style="font-size:.82rem;color:var(--text-muted);margin-bottom:12px">Enter current balance for each pot. Leave 0 for new pots.</p>${pots.map(p=>`<div class="form-group"><label class="form-label">${p.icon} ${p.name}</label><input type="number" class="form-input setup-pot-balance" data-pot-id="${p.id}" value="0" placeholder="₹ current balance"></div>`).join("")}`;break;}
-    case"sip":body=`<p style="font-size:.82rem;color:var(--text-muted);margin-bottom:12px">Track SIP mutual funds to estimate net worth. Skip if you don't have SIPs.</p><div class="form-group"><label class="form-label">SIP Fund 1 — Name</label><input type="text" class="form-input" id="setup-sip1-name" value="${config.sipPPFAS.name||''}" placeholder="Fund name"></div><div style="display:flex;gap:10px"><div class="form-group" style="flex:1"><label class="form-label">Monthly (₹)</label><input type="number" class="form-input" id="setup-sip1-amt" value="${config.sipPPFAS.amount||''}" placeholder="₹ per month"></div><div class="form-group" style="flex:1"><label class="form-label">Expected CAGR (%)</label><input type="number" class="form-input" id="setup-sip1-cagr" value="${config.sipPPFAS.cagr?config.sipPPFAS.cagr*100:''}" placeholder="%" step="0.5"></div></div><div class="form-group" style="margin-top:12px"><label class="form-label">SIP Fund 2 — Name</label><input type="text" class="form-input" id="setup-sip2-name" value="${config.sipNifty.name||''}" placeholder="Fund name"></div><div style="display:flex;gap:10px"><div class="form-group" style="flex:1"><label class="form-label">Monthly (₹)</label><input type="number" class="form-input" id="setup-sip2-amt" value="${config.sipNifty.amount||''}" placeholder="₹ per month"></div><div class="form-group" style="flex:1"><label class="form-label">Expected CAGR (%)</label><input type="number" class="form-input" id="setup-sip2-cagr" value="${config.sipNifty.cagr?config.sipNifty.cagr*100:''}" placeholder="%" step="0.5"></div></div><div class="form-group"><label class="form-label">SIP auto-debit day</label><input type="number" class="form-input" id="setup-sip-day" value="${config.sipDay||3}" min="1" max="28"></div>`;break;
+    case"sip":{
+      const sips = config.sips && config.sips.length > 0 ? config.sips : [{id:"sip-1",name:"",amount:0}];
+      body=`<p style="font-size:.82rem;color:var(--text-muted);margin-bottom:12px">Track your SIP mutual funds. Add as many as you have, or skip if none.</p>
+        <div id="setup-sips-list">
+          ${sips.map((s,i)=>`<div class="glass-card setup-sip-row" data-idx="${i}" style="margin-bottom:10px;padding:12px">
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+              <input type="text" class="form-input setup-sip-name" value="${s.name}" placeholder="Fund name" style="flex:1">
+            </div>
+            <div class="form-group"><label class="form-label">Monthly (₹)</label>
+              <input type="number" class="form-input setup-sip-amt" value="${s.amount||''}" placeholder="₹ per month"></div>
+          </div>`).join("")}
+        </div>
+        <button type="button" class="btn-secondary btn-sm" id="setup-add-sip" style="margin-top:10px">+ Add another SIP</button>
+        <div class="form-group" style="margin-top:12px"><label class="form-label">SIP auto-debit day</label>
+          <input type="number" class="form-input" id="setup-sip-day" value="${config.sipDay||3}" min="1" max="28"></div>`;break;}
     case"done":body=`<div style="text-align:center;padding-top:40px"><div style="font-size:4rem;margin-bottom:16px">🎉</div><h2 style="font-size:1.4rem;font-weight:800;margin-bottom:8px">${step.title}</h2><p style="color:var(--text-muted);line-height:1.6;font-size:.9rem">${step.subtitle}</p><div style="margin-top:16px;font-size:.82rem;color:var(--text-dim)">All your data is stored locally in IndexedDB.<br>Nothing is in the source code. Nothing leaves your device.</div></div>`;break;
   }
   const prevBtn=isFirst?"":`<button type="button" class="btn-secondary btn-sm" id="setup-prev" style="flex:1">Back</button>`;
@@ -1263,6 +1368,7 @@ function renderSetupStep(){
   overlay.querySelector("#setup-prev")?.addEventListener("click",()=>advanceSetup(-1));
   if(step.id==="bonus") overlay.querySelectorAll("#setup-bonus-months button").forEach(btn=>btn.addEventListener("click",()=>{btn.classList.toggle("btn-primary");btn.classList.toggle("btn-secondary")}));
   if(step.id==="pots") overlay.querySelector("#setup-add-pot")?.addEventListener("click",()=>{const list=overlay.querySelector("#setup-pots-list");const idx=list.children.length;const div=document.createElement("div");div.innerHTML=setupPotRow({id:"pot"+(idx+1),name:"",target:0,monthly:0,icon:"💰"},idx);list.appendChild(div.firstElementChild)});
+  if(step.id==="sip") overlay.querySelector("#setup-add-sip")?.addEventListener("click",()=>{const list=overlay.querySelector("#setup-sips-list");const idx=list.children.length;const div=document.createElement("div");div.className="glass-card setup-sip-row";div.dataset.idx=idx;div.style.cssText="margin-bottom:10px;padding:12px";div.innerHTML=`<div style="display:flex;gap:8px;margin-bottom:8px"><input type="text" class="form-input setup-sip-name" placeholder="Fund name" style="flex:1"></div><div class="form-group"><label class="form-label">Monthly (₹)</label><input type="number" class="form-input setup-sip-amt" placeholder="₹ per month"></div>`;list.appendChild(div)});
 }
 function setupPotRow(pot,idx){
   const icons=["🛡️","🎯","👨‍👩‍👦","🏠","✈️","🎓","💰","🚗","💻","🎮"];
@@ -1276,7 +1382,7 @@ function collectSetupData(stepId){
     case"split":config.motherAmount=parseFloat(overlay.querySelector("#setup-mother")?.value)||0;config.transferDay=parseInt(overlay.querySelector("#setup-transfer-day")?.value)||2;break;
     case"pots":{const pots=[];overlay.querySelectorAll(".setup-pot-row").forEach((row,i)=>{const name=row.querySelector(".setup-pot-name")?.value.trim();if(!name)return;const icon=row.querySelector(".setup-pot-icon")?.value||"💰";const monthly=parseFloat(row.querySelector(".setup-pot-monthly")?.value)||0;const target=parseFloat(row.querySelector(".setup-pot-target")?.value)||0;const id=name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||("pot"+i);pots.push({id,name,icon,monthly,target})});config.pots=pots;break;}
     case"balances":{pendingPotBalances={};overlay.querySelectorAll(".setup-pot-balance").forEach(inp=>{const potId=inp.dataset.potId;const amount=parseFloat(inp.value)||0;if(potId&&amount>0)pendingPotBalances[potId]=amount});break;}
-    case"sip":config.sipPPFAS={name:overlay.querySelector("#setup-sip1-name")?.value.trim()||"SIP Fund 1",amount:parseFloat(overlay.querySelector("#setup-sip1-amt")?.value)||0,cagr:(parseFloat(overlay.querySelector("#setup-sip1-cagr")?.value)||0)/100};config.sipNifty={name:overlay.querySelector("#setup-sip2-name")?.value.trim()||"SIP Fund 2",amount:parseFloat(overlay.querySelector("#setup-sip2-amt")?.value)||0,cagr:(parseFloat(overlay.querySelector("#setup-sip2-cagr")?.value)||0)/100};config.sipDay=parseInt(overlay.querySelector("#setup-sip-day")?.value)||3;break;
+    case"sip":{const sips=[];overlay.querySelectorAll(".setup-sip-row").forEach((row,i)=>{const name=row.querySelector(".setup-sip-name")?.value.trim();if(!name)return;const amount=parseFloat(row.querySelector(".setup-sip-amt")?.value)||0;if(amount<=0)return;const id="sip-"+(i+1);sips.push({id,name,amount})});config.sips=sips;config.sipDay=parseInt(overlay.querySelector("#setup-sip-day")?.value)||3;break;}
   }
 }
 async function advanceSetup(dir){
