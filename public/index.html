@@ -9,10 +9,15 @@
   <title>Paisa</title>
   <script>
   // Escape hatch: visit ?reset to nuke everything and start fresh
-  // Also auto-clears stale SW caches on version mismatch (no reload loop)
+  // Shows a confirmation first to prevent accidental resets
   (function(){
     var doReset = location.search.indexOf("reset") !== -1;
     if (doReset) {
+      if (!confirm("⚠️ This will delete ALL your Paisa data — pots, months, snapshots, everything.\n\nAre you sure?")) {
+        // User cancelled — redirect to clean URL
+        location.href = location.pathname;
+        return;
+      }
       // Nuke IndexedDB
       try { indexedDB.deleteDatabase("PaisaDB"); } catch(e){}
       // Nuke all SW caches
@@ -37,7 +42,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=5">
+  <link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
 
@@ -202,6 +207,6 @@
   <!-- ═══ Toast ═══ -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

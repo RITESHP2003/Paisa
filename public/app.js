@@ -4,7 +4,7 @@
    ═══════════════════════════════════════════ */
 "use strict";
 
-const APP_VERSION = 1;
+const APP_VERSION = 2;
 
 /* ── Default Config (no personal data — filled during first-run setup) ── */
 const DEFAULT_CONFIG = {
@@ -62,7 +62,18 @@ function tx(store, mode = "readonly") {
 
 function dbPut(store, val, key) {
   return new Promise((res, rej) => {
-    const r = key !== undefined ? tx(store, "readwrite").put(val, key) : tx(store, "readwrite").put(val);
+    const s = tx(store, "readwrite");
+    let r;
+    if (key !== undefined) {
+      // Out-of-line key store (config uses this)
+      r = s.put(val, key);
+    } else if (val.id != null) {
+      // Has an id — update existing record
+      r = s.put(val);
+    } else {
+      // No id — new record, use add() so autoIncrement generates the key
+      r = s.add(val);
+    }
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
   });
@@ -315,8 +326,11 @@ async function renderHome() {
 
     const daysLeft = daysLeftInMonth();
     const dailyBudget = daysLeft > 0 ? Math.round(safeToSpend / daysLeft) : 0;
-    document.getElementById("daily-budget").innerHTML =
-      `~<strong>${fmt(dailyBudget)}</strong>/day for ${daysLeft} days`;
+    let dailyHtml = `~<strong>${fmt(dailyBudget)}</strong>/day for ${daysLeft} days`;
+    if (extraMoney > 0) {
+      dailyHtml += `<br><span style="font-size:.72rem;color:var(--accent2)">Includes ${fmt(extraMoney)} extra money this month</span>`;
+    }
+    document.getElementById("daily-budget").innerHTML = dailyHtml;
 
     document.getElementById("budget-bar").style.width = pct + "%";
     document.getElementById("budget-bar").className = "progress-fill " + (pct > 85 ? "red" : pct > 60 ? "yellow" : "green");
@@ -357,6 +371,72 @@ async function renderHome() {
   document.getElementById("networth-breakdown").innerHTML = `
     <div class="networth-item">Pots<strong>${fmt(totalPots)}</strong></div>
     <div class="networth-item">SIP (est.)<strong>${fmt(sip.total)}</strong></div>`;
+
+  // New month onboarding check
+  await checkNewMonthPrompt(snap);
+}
+
+/* ── New Month Onboarding Prompt ── */
+async function checkNewMonthPrompt(snap) {
+  let promptEl = document.getElementById("new-month-prompt");
+  const key = monthKey();
+  const existing = await dbGet("months", key);
+
+  if (existing) {
+    // Month already set up — remove prompt if it exists
+    if (promptEl) promptEl.remove();
+    return;
+  }
+
+  // No month set up for current month — show prompt
+  if (!promptEl) {
+    promptEl = document.createElement("div");
+    promptEl.id = "new-month-prompt";
+    promptEl.className = "glass-card";
+    promptEl.style.cssText = "margin-top:12px;border:1px solid var(--accent);background:rgba(124,108,240,0.08)";
+    // Insert after the first glass-card (safe-to-spend)
+    const firstCard = document.querySelector("#screen-home .glass-card");
+    if (firstCard) firstCard.parentNode.insertBefore(promptEl, firstCard.nextSibling);
+    else document.getElementById("screen-home").appendChild(promptEl);
+  }
+
+  const month = parseInt(key.split("-")[1]);
+  const isBonus = (config.bonusMonths || []).includes(month);
+  const expectedSalary = isBonus ? config.bonusIncome : config.income;
+  const lastBal = snap ? snap.hsbc : 0;
+  const lastCC = snap ? snap.cc : 0;
+  const leftoverEstimate = lastBal - lastCC - config.floor;
+
+  // Calculate SBI transfer total
+  const sbiTotal = config.pots.reduce((s, p) => s + p.monthly, 0);
+
+  promptEl.innerHTML = `
+    <div style="font-size:.82rem;font-weight:700;color:var(--accent);margin-bottom:6px">
+      📋 ${monthLabel(key)} — Ready to set up
+    </div>
+    <div style="font-size:.78rem;color:var(--text-muted);line-height:1.5;margin-bottom:8px">
+      ${isBonus ? '🎁 <strong>Bonus month!</strong> Expected: ' + fmt(expectedSalary) : 'Expected salary: ' + fmt(expectedSalary)}
+      ${lastBal > 0 ? `<br>Last HSBC balance: ${fmt(lastBal)} ${lastCC > 0 ? `(CC: ${fmt(lastCC)})` : ''}` : ''}
+      ${leftoverEstimate > config.floor && lastBal > 0 ? `<br>Estimated leftover from last month: ${fmt(leftoverEstimate)}` : ''}
+      <br><br>
+      <strong>Transfers needed:</strong><br>
+      → ${fmt(sbiTotal)} to SBI (pots) on the ${ordinal(config.transferDay)}<br>
+      → ${fmt(config.motherAmount)} to family on the ${ordinal(config.transferDay)}<br>
+      → ${fmt(config.sipPPFAS.amount + config.sipNifty.amount)} SIP auto-debit on the ${ordinal(config.sipDay)}
+    </div>
+    <button class="btn-primary btn-sm" id="btn-setup-month" style="width:100%">Set up ${monthLabel(key).split(" ")[0]}</button>`;
+
+  promptEl.querySelector("#btn-setup-month").addEventListener("click", () => {
+    showScreen("months");
+    // Trigger the new month modal
+    document.getElementById("btn-new-month").click();
+  });
+}
+
+function ordinal(n) {
+  const s = ["th","st","nd","rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
 /* ── Snapshot Save ── */
@@ -391,15 +471,20 @@ document.getElementById("btn-extra-money").addEventListener("click", () => {
     </div>`, [
     { label: "Add", primary: true, fn: async () => {
       const amt = parseFloat(document.getElementById("modal-extra-amt").value) || 0;
-      if (amt <= 0) return;
+      if (amt <= 0) { toast("Enter an amount"); return; }
+      const note = document.getElementById("modal-extra-note").value.trim();
       const snap = await getLatestSnapshot();
       if (snap) {
         snap.extra = (snap.extra || 0) + amt;
+        if (!snap.extraLog) snap.extraLog = [];
+        snap.extraLog.push({ amount: amt, note, date: new Date().toISOString() });
         await dbPut("snapshots", snap);
       } else {
-        await dbPut("snapshots", { date: new Date().toISOString(), hsbc: 0, cc: 0, extra: amt });
+        // No snapshot yet — need one first
+        toast("Save a snapshot with your HSBC balance first");
+        return;
       }
-      toast(`Added ${fmt(amt)} extra`);
+      toast(`Added ${fmt(amt)} extra ✓`);
       renderHome();
     }},
     { label: "Cancel" }
@@ -415,6 +500,10 @@ async function openPotDetail(potId) {
   if (!pot) return;
 
   showScreen("pot");
+
+  // Update header with pot name
+  const backBtn = document.getElementById("pot-back");
+  backBtn.innerHTML = `← <span>${pot.icon} ${pot.name}</span>`;
 
   const bal = await getPotBalance(potId);
   document.getElementById("pot-bal").textContent = fmt(bal);
@@ -474,24 +563,74 @@ document.getElementById("btn-pot-take").addEventListener("click", () => potTxMod
 
 function potTxModal(type) {
   const label = type === "in" ? "Add money" : "Take out";
+  const currentPot = config.pots.find(p => p.id === currentPotId);
+  const otherPots = config.pots.filter(p => p.id !== currentPotId);
+
+  // Source/destination selection for transfers between pots
+  const sourceHtml = type === "in" ? `
+    <div class="form-group">
+      <label class="form-label">Source</label>
+      <select class="form-input" id="modal-pot-source">
+        <option value="">None (external deposit)</option>
+        ${otherPots.map(p => `<option value="${p.id}">${p.icon} ${p.name}</option>`).join("")}
+      </select>
+    </div>` : `
+    <div class="form-group">
+      <label class="form-label">Send to</label>
+      <select class="form-input" id="modal-pot-dest">
+        <option value="">None (withdrawal)</option>
+        ${otherPots.map(p => `<option value="${p.id}">${p.icon} ${p.name}</option>`).join("")}
+      </select>
+    </div>`;
+
   showModal(label, `
     <div class="form-group">
       <label class="form-label">Amount</label>
       <input type="number" class="form-input" id="modal-pot-amt" placeholder="₹">
     </div>
+    ${sourceHtml}
     <div class="form-group">
       <label class="form-label">Note</label>
       <input type="text" class="form-input" id="modal-pot-note" placeholder="Optional note">
     </div>`, [
     { label: label, primary: true, fn: async () => {
       const amt = parseFloat(document.getElementById("modal-pot-amt").value) || 0;
-      if (amt <= 0) return;
+      if (amt <= 0) { toast("Enter an amount"); return; }
       const note = document.getElementById("modal-pot-note").value.trim();
-      await dbPut("potTx", {
-        potId: currentPotId, date: new Date().toISOString(),
-        type, amount: amt, note
-      });
-      toast(`${type === "in" ? "Added" : "Removed"} ${fmt(amt)}`);
+
+      if (type === "in") {
+        // Add to current pot
+        await dbPut("potTx", {
+          potId: currentPotId, date: new Date().toISOString(),
+          type: "in", amount: amt, note: note || "Added"
+        });
+        // If source pot selected, take from it
+        const sourceId = document.getElementById("modal-pot-source")?.value;
+        if (sourceId) {
+          const sourcePot = config.pots.find(p => p.id === sourceId);
+          await dbPut("potTx", {
+            potId: sourceId, date: new Date().toISOString(),
+            type: "out", amount: amt,
+            note: `Transfer to ${currentPot?.name || "pot"}`
+          });
+        }
+      } else {
+        // Take from current pot
+        await dbPut("potTx", {
+          potId: currentPotId, date: new Date().toISOString(),
+          type: "out", amount: amt, note: note || "Withdrawn"
+        });
+        // If destination pot selected, add to it
+        const destId = document.getElementById("modal-pot-dest")?.value;
+        if (destId) {
+          await dbPut("potTx", {
+            potId: destId, date: new Date().toISOString(),
+            type: "in", amount: amt,
+            note: `Transfer from ${currentPot?.name || "pot"}`
+          });
+        }
+      }
+      toast(`${type === "in" ? "Added" : "Removed"} ${fmt(amt)} ✓`);
       await checkMilestone(currentPotId);
       openPotDetail(currentPotId);
     }},
@@ -1208,17 +1347,34 @@ document.getElementById("btn-settings").addEventListener("click", () => {
       <input type="number" class="form-input" id="set-floor" value="${config.floor}">
     </div>
     <div class="form-group">
-      <label class="form-label">Mother amount (₹)</label>
+      <label class="form-label">Family transfer (₹/month)</label>
       <input type="number" class="form-input" id="set-mother" value="${config.motherAmount}">
     </div>
-    <div class="section-label">Pots</div>
+    <div class="section-label">Pots <span style="font-size:.65rem;font-weight:400;text-transform:none;letter-spacing:0">(changes apply to future months only)</span></div>
     <div id="set-pots-list">
       ${config.pots.map((p, i) => `
-        <div class="month-row">
-          <span>${p.icon} ${p.name}</span>
-          <span>₹${p.monthly}/mo ${p.target > 0 ? `→ ${fmt(p.target)}` : ""}</span>
+        <div class="glass-card set-pot-row" data-pot-id="${p.id}" style="margin-bottom:8px;padding:10px">
+          <div style="display:flex;gap:8px;margin-bottom:6px;align-items:center">
+            <select class="form-input set-pot-icon" style="width:50px;text-align:center;font-size:1.1rem;padding:4px">
+              ${["🛡️","🎯","👨‍👩‍👦","🏠","✈️","🎓","💰","🚗","💻","🎮"].map(ic => `<option ${ic === p.icon ? 'selected' : ''}>${ic}</option>`).join("")}
+            </select>
+            <input type="text" class="form-input set-pot-name" value="${p.name}" style="flex:1">
+            <button type="button" class="btn-danger btn-sm set-pot-delete" style="padding:4px 8px;font-size:.7rem">✕</button>
+          </div>
+          <div style="display:flex;gap:8px">
+            <div style="flex:1"><label class="form-label" style="font-size:.65rem">Monthly ₹</label><input type="number" class="form-input set-pot-monthly" value="${p.monthly}"></div>
+            <div style="flex:1"><label class="form-label" style="font-size:.65rem">Target ₹</label><input type="number" class="form-input set-pot-target" value="${p.target || 0}"></div>
+          </div>
         </div>
       `).join("")}
+    </div>
+    <button type="button" class="btn-secondary btn-sm" id="set-add-pot" style="width:100%;margin-top:4px">+ Add new pot</button>
+    <div class="section-label" style="margin-top:16px">Bonus months</div>
+    <div id="set-bonus-months" style="display:flex;flex-wrap:wrap;gap:6px">
+      ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m, i) => {
+        const active = (config.bonusMonths || []).includes(i + 1);
+        return `<button type="button" class="btn-sm ${active ? 'btn-primary' : 'btn-secondary'}" data-month="${i+1}" style="width:calc(25% - 5px);font-size:.72rem">${m}</button>`;
+      }).join("")}
     </div>
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--glass-border)">
       <div class="section-label">Danger zone</div>
@@ -1231,6 +1387,28 @@ document.getElementById("btn-settings").addEventListener("click", () => {
       config.spendingBudget = parseFloat(document.getElementById("set-budget").value) || config.spendingBudget;
       config.floor = parseFloat(document.getElementById("set-floor").value) || config.floor;
       config.motherAmount = parseFloat(document.getElementById("set-mother").value) || config.motherAmount;
+
+      // Read pot edits
+      const potRows = document.querySelectorAll(".set-pot-row");
+      const updatedPots = [];
+      potRows.forEach(row => {
+        const id = row.dataset.potId;
+        const name = row.querySelector(".set-pot-name")?.value.trim();
+        if (!name) return;
+        const icon = row.querySelector(".set-pot-icon")?.value || "💰";
+        const monthly = parseFloat(row.querySelector(".set-pot-monthly")?.value) || 0;
+        const target = parseFloat(row.querySelector(".set-pot-target")?.value) || 0;
+        updatedPots.push({ id, name, icon, monthly, target });
+      });
+      config.pots = updatedPots;
+
+      // Read bonus months
+      const selectedMonths = [];
+      document.querySelectorAll("#set-bonus-months button.btn-primary").forEach(b => {
+        selectedMonths.push(parseInt(b.dataset.month));
+      });
+      config.bonusMonths = selectedMonths;
+
       await saveConfig();
       toast("Settings saved ✓");
       renderHome();
@@ -1238,8 +1416,55 @@ document.getElementById("btn-settings").addEventListener("click", () => {
     { label: "Cancel" }
   ]);
 
-  // Wire up danger zone buttons after modal renders
+  // Wire up events after modal renders
   setTimeout(() => {
+    // Bonus month toggles
+    document.querySelectorAll("#set-bonus-months button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        btn.classList.toggle("btn-primary");
+        btn.classList.toggle("btn-secondary");
+      });
+    });
+
+    // Delete pot buttons
+    document.querySelectorAll(".set-pot-delete").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const row = btn.closest(".set-pot-row");
+        if (document.querySelectorAll(".set-pot-row").length <= 1) {
+          toast("Need at least one pot");
+          return;
+        }
+        row.remove();
+      });
+    });
+
+    // Add pot button
+    document.getElementById("set-add-pot")?.addEventListener("click", () => {
+      const list = document.getElementById("set-pots-list");
+      const newId = "pot-" + Date.now();
+      const div = document.createElement("div");
+      div.className = "glass-card set-pot-row";
+      div.dataset.potId = newId;
+      div.style.cssText = "margin-bottom:8px;padding:10px";
+      div.innerHTML = `
+        <div style="display:flex;gap:8px;margin-bottom:6px;align-items:center">
+          <select class="form-input set-pot-icon" style="width:50px;text-align:center;font-size:1.1rem;padding:4px">
+            ${["🛡️","🎯","👨‍👩‍👦","🏠","✈️","🎓","💰","🚗","💻","🎮"].map(ic => `<option>${ic}</option>`).join("")}
+          </select>
+          <input type="text" class="form-input set-pot-name" placeholder="Pot name" style="flex:1">
+          <button type="button" class="btn-danger btn-sm set-pot-delete" style="padding:4px 8px;font-size:.7rem">✕</button>
+        </div>
+        <div style="display:flex;gap:8px">
+          <div style="flex:1"><label class="form-label" style="font-size:.65rem">Monthly ₹</label><input type="number" class="form-input set-pot-monthly" value="0"></div>
+          <div style="flex:1"><label class="form-label" style="font-size:.65rem">Target ₹</label><input type="number" class="form-input set-pot-target" value="0"></div>
+        </div>`;
+      list.appendChild(div);
+      div.querySelector(".set-pot-delete").addEventListener("click", () => {
+        if (document.querySelectorAll(".set-pot-row").length <= 1) { toast("Need at least one pot"); return; }
+        div.remove();
+      });
+    });
+
     document.getElementById("set-rerun-setup")?.addEventListener("click", () => {
       closeModal();
       config.setupDone = false;
