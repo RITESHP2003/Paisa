@@ -59,6 +59,7 @@ function openDB() {
     };
     req.onsuccess = () => { db = req.result; resolve(db); };
     req.onerror = () => reject(req.error);
+    req.onblocked = () => reject(new Error("Database upgrade blocked — close other Paisa tabs and reload"));
   });
 }
 
@@ -1504,9 +1505,24 @@ async function finishSetup(){
 
 /* ═══ INIT ═══ */
 async function init(){
-  await openDB();await loadConfig();
-  if(!config.setupDone){showSetupWizard();return}
-  renderHome();
+  try {
+    await openDB();await loadConfig();
+    if(!config.setupDone){showSetupWizard();return}
+    renderHome();
+  } catch(err) {
+    // Show visible error instead of blank screen
+    document.body.innerHTML = `<div style="padding:40px 20px;text-align:center;color:#eef0ff;font-family:-apple-system,sans-serif">
+      <div style="font-size:2rem;margin-bottom:16px">⚠️</div>
+      <div style="font-size:1.1rem;font-weight:700;margin-bottom:8px">Paisa couldn't load</div>
+      <div style="font-size:.82rem;color:#7b7bab;line-height:1.6;margin-bottom:16px">${err.message || err}<br><br>
+        This usually means the app updated but your browser served an old cached version.<br>
+        A hard refresh should fix it.</div>
+      <button onclick="location.reload()" style="padding:10px 24px;border:none;border-radius:12px;background:linear-gradient(135deg,#7c6cf0,#a78bfa);color:#fff;font-size:.9rem;font-weight:600;cursor:pointer">Reload</button>
+      <div style="margin-top:12px">
+        <button onclick="if(confirm('Clear all caches and reload?')){caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k)))).then(()=>location.reload())}" style="padding:8px 16px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;background:none;color:#7b7bab;font-size:.78rem;cursor:pointer">Clear cache & reload</button>
+      </div>
+    </div>`;
+  }
 }
 if("serviceWorker"in navigator)navigator.serviceWorker.register("sw.js");
 init();
