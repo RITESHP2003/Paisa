@@ -338,3 +338,14 @@ select.form-input{appearance:none;background-image:url("data:image/svg+xml,%3Csv
 .installment-status.pending{background:var(--orange-dim);color:var(--orange)}
 .installment-status.paid{background:var(--green-dim);color:var(--green)}
 .installment-status.overdue{background:var(--red-dim);color:var(--red)}
+
+/* ── Refresh Button ── */
+.btn-refresh{
+  background:var(--glass);border:1px solid var(--glass-border);
+  border-radius:10px;width:36px;height:36px;font-size:1.1rem;
+  cursor:pointer;touch-action:manipulation;display:flex;align-items:center;justify-content:center;
+  transition:transform .2s
+}
+.btn-refresh:active{transform:rotate(180deg)}
+.btn-refresh.spinning{animation:spin .8s linear infinite}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}

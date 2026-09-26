@@ -1503,6 +1503,38 @@ async function finishSetup(){
   document.querySelector(".bottom-nav").classList.remove("hidden");renderHome();
 }
 
+/* ═══ FORCE UPDATE ═══ */
+async function forceUpdate(btn) {
+  if (btn) btn.classList.add("spinning");
+  try {
+    // 1. Tell the SW to check for a new version
+    if ("serviceWorker" in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) {
+        await reg.update();
+        // If a new SW is waiting, activate it
+        if (reg.waiting) {
+          reg.waiting.postMessage({ type: "SKIP_WAITING" });
+        }
+      }
+    }
+    // 2. Clear all old caches so the new SW fetches fresh files
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+    // 3. Reload
+    toast("Updating...");
+    setTimeout(() => location.reload(), 300);
+  } catch (err) {
+    toast("Update check failed — try again");
+    if (btn) btn.classList.remove("spinning");
+  }
+}
+
+document.getElementById("btn-refresh").addEventListener("click", function() { forceUpdate(this); });
+document.getElementById("btn-check-update").addEventListener("click", () => { forceUpdate(null); });
+
 /* ═══ INIT ═══ */
 async function init(){
   try {

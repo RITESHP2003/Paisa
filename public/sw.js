@@ -1,9 +1,9 @@
-const CACHE_NAME = "paisa-v10";
+const CACHE_NAME = "paisa-v11";
 const SHELL = [
   "./",
   "index.html",
-  "styles.css?v=10",
-  "app.js?v=10",
+  "styles.css?v=11",
+  "app.js?v=11",
   "manifest.json"
 ];
 
@@ -31,4 +31,9 @@ self.addEventListener("fetch", (e) => {
       })
       .catch(() => caches.match(e.request))
   );
+});
+
+// Force activate when the app sends SKIP_WAITING
+self.addEventListener("message", (e) => {
+  if (e.data && e.data.type === "SKIP_WAITING") self.skipWaiting();
 });

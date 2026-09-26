@@ -29,7 +29,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=10">
+  <link rel="stylesheet" href="styles.css?v=11">
 </head>
 <body>
 
@@ -40,6 +40,7 @@
         <div class="page-title">💰 Paisa</div>
         <div class="page-subtitle" id="home-date"></div>
       </div>
+      <button class="btn-refresh" id="btn-refresh" title="Check for updates">🔄</button>
     </div>
 
     <!-- Safe to Spend -->
@@ -194,6 +195,11 @@
       <div class="page-title">⚙️ More</div>
     </div>
     <div class="glass-card" style="padding:0;overflow:hidden">
+      <div class="more-item" id="btn-check-update">
+        <div class="more-icon">🔄</div>
+        <div class="more-label">Check for updates</div>
+        <div class="more-chevron">›</div>
+      </div>
       <div class="more-item" id="btn-afford">
         <div class="more-icon">🤔</div>
         <div class="more-label">Can I afford this?</div>
@@ -249,6 +255,6 @@
   <!-- ═══ Toast ═══ -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=10"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>
