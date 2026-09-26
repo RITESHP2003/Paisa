@@ -29,7 +29,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body>
 
@@ -173,6 +173,21 @@
     <div class="tx-list" id="loan-installments-list"></div>
   </div>
 
+  <!-- ═══ Screen: SIP DETAIL ═══ -->
+  <div id="screen-sip" class="screen hidden">
+    <div class="pot-detail-header">
+      <button class="back-btn" id="sip-back">← <span>SIP</span></button>
+      <div class="pot-detail-balance" id="sip-bal">₹0</div>
+      <div class="pot-detail-target" id="sip-info"></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn-primary btn-sm" style="flex:1" id="btn-sip-add">+ Add investment</button>
+      <button class="btn-secondary btn-sm" id="btn-sip-edit">✏️ Edit fund</button>
+    </div>
+    <div class="section-label">History</div>
+    <div class="tx-list" id="sip-tx-list"></div>
+  </div>
+
   <!-- ═══ Screen 4: MORE ═══ -->
   <div id="screen-more" class="screen hidden">
     <div class="page-header">
@@ -234,6 +249,6 @@
   <!-- ═══ Toast ═══ -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=8"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>

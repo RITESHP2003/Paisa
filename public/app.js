@@ -24,7 +24,7 @@ const DEFAULT_CONFIG = {
 
 /* ── IndexedDB ── */
 const DB_NAME = "PaisaDB";
-const DB_VERSION = 2; // bumped for loans store
+const DB_VERSION = 3; // added sipTx store
 let db = null;
 
 function openDB() {
@@ -50,6 +50,11 @@ function openDB() {
       }
       if (!d.objectStoreNames.contains("loans")) {
         d.createObjectStore("loans", { keyPath: "id", autoIncrement: true });
+      }
+      if (!d.objectStoreNames.contains("sipTx")) {
+        const s = d.createObjectStore("sipTx", { keyPath: "id", autoIncrement: true });
+        s.createIndex("sipId", "sipId");
+        s.createIndex("date", "date");
       }
     };
     req.onsuccess = () => { db = req.result; resolve(db); };
@@ -130,10 +135,11 @@ const screens = ["home", "months", "money", "more"];
 let activeScreen = "home";
 
 function showScreen(name) {
-  if (name === "pot" || name === "loan") {
+  if (name === "pot" || name === "loan" || name === "sip") {
     screens.forEach(s => document.getElementById(`screen-${s}`).classList.add("hidden"));
     document.getElementById("screen-pot").classList.add("hidden");
     document.getElementById("screen-loan").classList.add("hidden");
+    document.getElementById("screen-sip").classList.add("hidden");
     document.getElementById(`screen-${name}`).classList.remove("hidden");
     document.querySelectorAll(".nav-item").forEach(b => b.classList.remove("active"));
     activeScreen = name;
@@ -142,6 +148,7 @@ function showScreen(name) {
   screens.forEach(s => document.getElementById(`screen-${s}`).classList.toggle("hidden", s !== name));
   document.getElementById("screen-pot").classList.add("hidden");
   document.getElementById("screen-loan").classList.add("hidden");
+  document.getElementById("screen-sip").classList.add("hidden");
   document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("active", b.dataset.screen === name));
   activeScreen = name;
   if (name === "home") renderHome();
@@ -171,7 +178,11 @@ function showModal(title, bodyHtml, actions) {
       btn.className = a.danger ? "btn-danger btn-sm" : (a.primary ? "btn-primary btn-sm" : "btn-secondary btn-sm");
       btn.style.flex = "1";
       btn.textContent = a.label;
-      btn.addEventListener("click", () => { closeModal(); if (a.fn) a.fn(); });
+      btn.addEventListener("click", async () => {
+        // Run fn BEFORE closing — fn reads inputs that closeModal destroys
+        if (a.fn) await a.fn();
+        else closeModal();
+      });
       actionsEl.appendChild(btn);
     });
   }
@@ -215,21 +226,27 @@ async function getAllPotBalances() {
   for (const pot of config.pots) result[pot.id] = await getPotBalance(pot.id);
   return result;
 }
-function getSIPSummary() {
-  const start = config.setupDate ? new Date(config.setupDate) : new Date();
-  start.setDate(1);
-  const now = new Date();
-  const months = Math.max(0, (now.getFullYear()-start.getFullYear())*12 + (now.getMonth()-start.getMonth()));
+async function getSIPBalance(sipId) {
+  const txs = await dbGetAll("sipTx", "sipId", IDBKeyRange.only(sipId));
+  return txs.reduce((sum, t) => sum + (t.type === "in" ? t.amount : -t.amount), 0);
+}
+async function getAllSIPBalances() {
+  const result = {};
+  for (const sip of (config.sips||[])) result[sip.id] = await getSIPBalance(sip.id);
+  return result;
+}
+async function getSIPSummary() {
   const sips = config.sips || [];
   let totalMonthly = 0;
   let totalInvested = 0;
+  const sipBals = await getAllSIPBalances();
   const funds = sips.map(s => {
-    const invested = s.amount * months;
+    const invested = sipBals[s.id] || 0;
     totalMonthly += s.amount;
     totalInvested += invested;
-    return { ...s, invested, months };
+    return { ...s, invested };
   });
-  return { funds, totalMonthly, totalInvested, months };
+  return { funds, totalMonthly, totalInvested };
 }
 async function getLatestSnapshot() {
   const all = await dbGetAll("snapshots");
@@ -343,6 +360,7 @@ function editExtraMoney(snap, idx) {
       entry.amount = newAmt;
       entry.note = document.getElementById("modal-edit-extra-note").value.trim();
       snap.extra = (snap.extra || 0) - oldAmt + newAmt;
+      closeModal();
       await dbPut("snapshots", snap);
       toast("Updated ✓");
       renderHome();
@@ -350,6 +368,7 @@ function editExtraMoney(snap, idx) {
     { label: "Delete", danger: true, fn: async () => {
       snap.extra = (snap.extra || 0) - entry.amount;
       snap.extraLog.splice(idx, 1);
+      closeModal();
       await dbPut("snapshots", snap);
       toast("Deleted");
       renderHome();
@@ -437,6 +456,7 @@ document.getElementById("btn-extra-money").addEventListener("click", () => {
       const amt = parseFloat(document.getElementById("modal-extra-amt").value)||0;
       if (amt <= 0) { toast("Enter an amount"); return; }
       const note = document.getElementById("modal-extra-note").value.trim();
+      closeModal();
       const snap = await getLatestSnapshot();
       if (!snap) { toast("Save a snapshot with your HSBC balance first"); return; }
       snap.extra = (snap.extra||0) + amt;
@@ -518,13 +538,14 @@ function potTxModal(type) {
       const amt = parseFloat(document.getElementById("modal-pot-amt").value)||0;
       if (amt<=0) { toast("Enter an amount"); return; }
       const note = document.getElementById("modal-pot-note").value.trim();
+      const srcId = type==="in" ? document.getElementById("modal-pot-source")?.value : null;
+      const destId = type==="out" ? document.getElementById("modal-pot-dest")?.value : null;
+      closeModal();
       if (type==="in") {
         await dbPut("potTx", { potId:currentPotId, date:new Date().toISOString(), type:"in", amount:amt, note:note||"Added" });
-        const srcId = document.getElementById("modal-pot-source")?.value;
         if (srcId) await dbPut("potTx", { potId:srcId, date:new Date().toISOString(), type:"out", amount:amt, note:`Transfer to ${currentPot?.name||"pot"}` });
       } else {
         await dbPut("potTx", { potId:currentPotId, date:new Date().toISOString(), type:"out", amount:amt, note:note||"Withdrawn" });
-        const destId = document.getElementById("modal-pot-dest")?.value;
         if (destId) await dbPut("potTx", { potId:destId, date:new Date().toISOString(), type:"in", amount:amt, note:`Transfer from ${currentPot?.name||"pot"}` });
       }
       toast(`${type==="in"?"Added":"Removed"} ${fmt(amt)} ✓`);
@@ -541,9 +562,10 @@ function editPotTx(t) {
     { label:"Save", primary:true, fn:async()=>{
       t.amount=parseFloat(document.getElementById("modal-edit-amt").value)||t.amount;
       t.note=document.getElementById("modal-edit-note").value.trim();
+      closeModal();
       await dbPut("potTx",t); toast("Updated ✓"); openPotDetail(currentPotId);
     }},
-    { label:"Delete", danger:true, fn:async()=>{ await dbDelete("potTx",t.id); toast("Deleted"); openPotDetail(currentPotId); }},
+    { label:"Delete", danger:true, fn:async()=>{ closeModal(); await dbDelete("potTx",t.id); toast("Deleted"); openPotDetail(currentPotId); }},
     { label:"Cancel" }
   ]);
 }
@@ -652,6 +674,7 @@ async function saveNewMonth() {
   allocations.push({label:"📈 SIP",amount:sipAmt}); totalAllocated+=sipAmt;
   const bonusEl = document.getElementById("split-bonus");
   if (bonusEl) { const b=parseFloat(bonusEl.value)||0; allocations.push({label:"🎁 Bonus extra",potId:"emergency",amount:b}); totalAllocated+=b; }
+  closeModal();
 
   for (const alloc of allocations) {
     if (alloc.potId && alloc.amount > 0) {
@@ -667,8 +690,9 @@ function editMonth(key) {
     <p style="font-size:.82rem;color:var(--text-muted);margin-bottom:12px">Edit the salary for this month.</p>
     <div class="form-group"><label class="form-label">Take-home salary</label><input type="number" class="form-input" id="modal-edit-salary" placeholder="₹"></div>`, [
     { label:"Save", primary:true, fn:async()=>{
-      const month=await dbGet("months",key); if(!month) return;
       const ns=parseFloat(document.getElementById("modal-edit-salary").value);
+      closeModal();
+      const month=await dbGet("months",key); if(!month) return;
       if(ns&&ns!==month.salary){month.salary=ns;await dbPut("months",month);toast("Updated ✓");renderMonths();}
     }},{ label:"Cancel" }
   ]);
@@ -685,9 +709,10 @@ function closeMonth(key) {
         <option value="leave">Leave in HSBC</option>
       </select></div>`, [
     { label:"Close month", primary:true, fn:async()=>{
-      const month=await dbGet("months",key); if(!month) return;
       const endBal=parseFloat(document.getElementById("modal-end-balance").value)||0;
       const dest=document.getElementById("modal-leftover-dest").value;
+      closeModal();
+      const month=await dbGet("months",key); if(!month) return;
       month.endBalance=endBal; month.status="done";
       const leftover=endBal-config.floor;
       if(leftover>0&&dest!=="next"&&dest!=="leave"){
@@ -705,7 +730,7 @@ function closeMonth(key) {
 async function renderMoney() {
   const potBals = await getAllPotBalances();
   const totalPots = Object.values(potBals).reduce((s,v)=>s+v,0);
-  const sipInfo = getSIPSummary();
+  const sipInfo = await getSIPSummary();
   const netWorth = totalPots + sipInfo.totalInvested;
   const months = await dbGetAll("months");
   months.sort((a,b)=>a.key.localeCompare(b.key));
@@ -771,17 +796,16 @@ function renderSIPCard(sipInfo) {
   }
 
   let html = '<div style="padding:12px">';
-  sips.forEach((s, idx) => {
-    const invested = s.amount * sipInfo.months;
+  sipInfo.funds.forEach((s, idx) => {
     html += `
       <div class="sip-fund-row" data-sip-idx="${idx}" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;${idx>0?'border-top:1px solid var(--glass-border)':''}cursor:pointer">
         <div>
           <div style="font-size:.85rem;font-weight:600">📈 ${s.name}</div>
-          <div style="font-size:.72rem;color:var(--text-muted)">${fmt(s.amount)}/month · Auto-debit ${ordinal(config.sipDay)}</div>
+          <div style="font-size:.72rem;color:var(--text-muted)">${fmt(s.amount)}/month · ${ordinal(config.sipDay)}</div>
         </div>
         <div style="text-align:right">
-          <div style="font-size:1rem;font-weight:700">${fmt(invested)}</div>
-          <div style="font-size:.65rem;color:var(--text-dim)">${sipInfo.months} month${sipInfo.months!==1?'s':''} invested</div>
+          <div style="font-size:1rem;font-weight:700">${fmt(s.invested)}</div>
+          <div style="font-size:.65rem;color:var(--text-dim)">invested</div>
         </div>
       </div>`;
   });
@@ -796,12 +820,12 @@ function renderSIPCard(sipInfo) {
   html += '</div>';
   card.innerHTML = html;
 
-  // Wire tap-to-edit
+  // Wire tap-to-detail (like pots)
   setTimeout(() => {
     card.querySelectorAll(".sip-fund-row").forEach(row => {
       row.addEventListener("click", () => {
         const idx = parseInt(row.dataset.sipIdx);
-        showSIPEditModal(idx);
+        openSIPDetail(config.sips[idx].id);
       });
     });
     document.getElementById("sip-add-btn")?.addEventListener("click", () => showSIPModal());
@@ -823,6 +847,7 @@ function showSIPModal(existingIdx) {
       const amount = parseFloat(document.getElementById("modal-sip-amt").value) || 0;
       if (!name) { toast("Enter a fund name"); return; }
       if (amount <= 0) { toast("Enter an amount"); return; }
+      closeModal();
       if (isEdit) {
         config.sips[existingIdx] = { ...config.sips[existingIdx], name, amount };
       } else {
@@ -831,6 +856,7 @@ function showSIPModal(existingIdx) {
       await saveConfig(); toast(isEdit ? "Updated ✓" : "Added ✓"); renderMoney();
     }},
     ...(isEdit ? [{ label: "Delete", danger: true, fn: async () => {
+      closeModal();
       config.sips.splice(existingIdx, 1);
       await saveConfig(); toast("Deleted"); renderMoney();
     }}] : []),
@@ -839,6 +865,78 @@ function showSIPModal(existingIdx) {
 }
 
 function showSIPEditModal(idx) { showSIPModal(idx); }
+
+/* ═══ SIP DETAIL SCREEN ═══ */
+let currentSipId = null;
+
+async function openSIPDetail(sipId) {
+  currentSipId = sipId;
+  const sip = (config.sips||[]).find(s => s.id === sipId);
+  if (!sip) return;
+  showScreen("sip");
+  document.getElementById("sip-back").innerHTML = `← <span>📈 ${sip.name}</span>`;
+  const bal = await getSIPBalance(sipId);
+  document.getElementById("sip-bal").textContent = fmt(bal);
+  document.getElementById("sip-info").textContent = `${fmt(sip.amount)}/month · Auto-debit ${ordinal(config.sipDay)}`;
+
+  // Transaction list
+  const txs = await dbGetAll("sipTx", "sipId", IDBKeyRange.only(sipId));
+  txs.sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const list = document.getElementById("sip-tx-list");
+  list.innerHTML = "";
+  if (!txs.length) { list.innerHTML='<div style="text-align:center;color:var(--text-dim);padding:24px;font-size:.85rem">No entries yet — tap "+ Add investment" to record your SIP payment</div>'; return; }
+  txs.forEach(t => {
+    const item = document.createElement("div");
+    item.className = "tx-item";
+    item.innerHTML = `
+      <div class="tx-left"><div class="tx-note">${t.note||(t.type==="in"?"Invested":"Withdrawn")}</div><div class="tx-date">${fmtDate(t.date)}</div></div>
+      <div class="tx-amount ${t.type==="in"?"credit":"debit"}">${t.type==="in"?"+":"−"}${fmt(t.amount)}</div>`;
+    item.addEventListener("click", ()=>editSIPTx(t));
+    list.appendChild(item);
+  });
+}
+
+document.getElementById("btn-sip-add").addEventListener("click", ()=>{
+  const sip = (config.sips||[]).find(s=>s.id===currentSipId);
+  showModal("Add SIP investment", `
+    <div class="form-group"><label class="form-label">Amount</label>
+      <input type="number" class="form-input" id="modal-sip-tx-amt" value="${sip?sip.amount:''}" placeholder="₹"></div>
+    <div class="form-group"><label class="form-label">Note</label>
+      <input type="text" class="form-input" id="modal-sip-tx-note" placeholder="e.g. Sep 2026 SIP"></div>`, [
+    { label:"Add", primary:true, fn:async()=>{
+      const amt=parseFloat(document.getElementById("modal-sip-tx-amt").value)||0;
+      if(amt<=0){toast("Enter an amount");return}
+      const note=document.getElementById("modal-sip-tx-note").value.trim();
+      closeModal();
+      await dbPut("sipTx",{sipId:currentSipId,date:new Date().toISOString(),type:"in",amount:amt,note:note||"SIP investment"});
+      toast(`Added ${fmt(amt)} ✓`);
+      openSIPDetail(currentSipId);
+    }},
+    { label:"Cancel" }
+  ]);
+});
+
+document.getElementById("btn-sip-edit").addEventListener("click", ()=>{
+  const idx = (config.sips||[]).findIndex(s=>s.id===currentSipId);
+  if(idx>=0) showSIPModal(idx);
+});
+
+document.getElementById("sip-back").addEventListener("click", ()=>showScreen("money"));
+
+function editSIPTx(t) {
+  showModal("Edit SIP entry", `
+    <div class="form-group"><label class="form-label">Amount</label><input type="number" class="form-input" id="modal-edit-sip-amt" value="${t.amount}"></div>
+    <div class="form-group"><label class="form-label">Note</label><input type="text" class="form-input" id="modal-edit-sip-note" value="${t.note||""}"></div>`, [
+    { label:"Save", primary:true, fn:async()=>{
+      t.amount=parseFloat(document.getElementById("modal-edit-sip-amt").value)||t.amount;
+      t.note=document.getElementById("modal-edit-sip-note").value.trim();
+      closeModal();
+      await dbPut("sipTx",t); toast("Updated ✓"); openSIPDetail(currentSipId);
+    }},
+    { label:"Delete", danger:true, fn:async()=>{ closeModal(); await dbDelete("sipTx",t.id); toast("Deleted"); openSIPDetail(currentSipId); }},
+    { label:"Cancel" }
+  ]);
+}
 
 /* ═══════════════════════════════════════
    LOANS FEATURE
@@ -901,6 +999,7 @@ async function createLoan() {
   const startKey = document.getElementById("loan-start").value;
   const note = document.getElementById("loan-note").value.trim();
   if (amount<=0) { toast("Enter an amount"); return; }
+  closeModal();
 
   const pot = config.pots.find(p=>p.id===potId);
   const emi = Math.ceil(amount/numMonths);
@@ -1236,6 +1335,7 @@ document.getElementById("btn-settings").addEventListener("click", ()=>{
       const selectedMonths=[];
       document.querySelectorAll("#set-bonus-months button.btn-primary").forEach(b=>selectedMonths.push(parseInt(b.dataset.month)));
       config.bonusMonths=selectedMonths;
+      closeModal();
       await saveConfig();toast("Settings saved ✓");
       if(activeScreen==="home")renderHome(); if(activeScreen==="money")renderMoney();
     }},{ label:"Cancel" }
@@ -1270,7 +1370,7 @@ document.getElementById("btn-export").addEventListener("click", async()=>{
   const data={version:APP_VERSION,exportedAt:new Date().toISOString(),
     config:await dbGet("config","main"),snapshots:await dbGetAll("snapshots"),
     potTx:await dbGetAll("potTx"),months:await dbGetAll("months"),
-    milestones:await dbGetAll("milestones"),loans:await dbGetAll("loans")};
+    milestones:await dbGetAll("milestones"),loans:await dbGetAll("loans"),sipTx:await dbGetAll("sipTx")};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
   const url=URL.createObjectURL(blob);const a=document.createElement("a");
   a.href=url;a.download=`paisa-backup-${new Date().toISOString().slice(0,10)}.json`;
@@ -1289,6 +1389,7 @@ document.getElementById("btn-import").addEventListener("click", ()=>{
       if(data.months) for(const m of data.months) await dbPut("months",m);
       if(data.milestones) for(const m of data.milestones) await dbPut("milestones",m);
       if(data.loans) for(const l of data.loans) await dbPut("loans",l);
+      if(data.sipTx) for(const t of data.sipTx) await dbPut("sipTx",t);
       await loadConfig();toast("Imported ✓ — refreshing");renderHome();
     }catch(err){toast("Import failed: "+err.message)}
   });input.click();
